@@ -1,0 +1,332 @@
+#!/usr/bin/env python2.6
+"""
+Simulate a background image.
+
+An object mask and weight map are used to generate a simulated
+background without any objects.  Typically, this script is used with
+an image with a weight map (necessary to estimate the variation in
+noise over image) and an object mask which defines the pixels that
+constitute objects; SExtractor generates such a mask image.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+import os
+import sys
+import matplotlib.pyplot as plt
+import numpy as np
+from numpy import ceil, exp, sqrt
+import pyfits as pf
+from scipy import signal
+from scipy.ndimage.interpolation import zoom
+
+
+__version__ = '20101208'
+__author__ = 'Taro Sato'
+__author_email__ = 'ubutsu@gmail.com'
+
+
+# use mpi4py if available
+try:
+    from mpi4py import MPI
+except ImportError:
+    from tsastro.dummympi4py import MPI
+mpi_comm = MPI.COMM_WORLD
+mpi_rank = mpi_comm.Get_rank()
+mpi_size = mpi_comm.Get_size()
+
+
+class MaxIterationError(RuntimeError):
+    pass
+
+
+class Logger(object):
+
+    def __init__(self, file=None):
+        self.file = sys.stdout if file is None else open(file, mode='a')
+
+    def w(self, s):
+        print(s, file=self.file)
+
+
+def sigmareject(data, rejseq):
+    """
+    Reject elements from an array by sigma clipping.
+
+    Input argument:
+
+      data -- An array to be processed.
+      rejseq -- A list of two-element tuple of low and high sigma
+                thresholds (both are posive number).  If an element is
+                None, rejection for that side will not be carried out.
+    """
+    data = np.asarray(data)
+    for lo, hi in rejseq:
+        x, dx = np.mean(data), np.std(data)
+        m = np.ones(data.size, dtype=bool)
+        if lo is not None:
+            m = m * np.greater(data, x - lo * dx)
+        if hi is not None:
+            m = m * np.less(data, x + hi * dx)
+        if m.sum() == data.size:
+            break
+        data = data[m]
+    return data
+
+
+def gauss_kern(xsig, ysig):
+    """
+    Generate a normalized 2D Gausssian kernel array for convolution.
+    """
+    nx = int(ceil(xsig * 3.))
+    ny = int(ceil(ysig * 3.))
+    x, y = np.mgrid[-ny:ny+1, -nx:nx+1]
+    k = exp(-(x**2/(2.*float(xsig)**2)+y**2/(2.*float(ysig)**2)))
+    return k / k.sum()
+
+
+def boxcar_kern(xsize, ysize):
+    """
+    Generate a normalized 2D boxcar kernel array for convolution.
+    """
+    k = np.ones((int(ceil(ysize)), int(ceil(xsize))))
+    return k / k.sum()
+
+
+def smooth_image(im, kern):
+    return signal.convolve(im, kern, mode='same')
+
+
+def fillbg(image, objmask, weight, bkgnd, badmask,
+           hwstamp=None, hwgrow=1, gsig=None, boxfw=None, zoomscale=None,
+           minpixel=10000, maxiter=200, rejseq='default', logfile=None):
+    """
+    Fill masked pixels with background with noise.
+
+    Input
+
+      image -- 2D image array
+      objmask -- 2D object mask array (nonzero pixels define objects)
+      weight -- 2D weight map array
+      bkgnd -- 2D background array
+      badmask -- 2D bad pixel mask array
+      hwstamp -- half-width in pixels of square stamps
+      hwgrow -- pixel(s) to grow a stamp to sample enough pixels
+      gsig -- Gaussian sigma in pixels for smoothing kernel
+      boxfw -- full-width in pixels for boxcar smoothing kernel
+      zoomscale -- zoom by this scale to immitate interpolation
+      minpixel -- required number of pixels to sample
+      maxiter -- maximum number of iterations for growing
+      rejseq -- sigma rejection sequence for sigmareject function run
+                on empirical data values
+      logfile -- path to the log file; rank number will be appended if
+                 more than one MPI process exist
+    """
+    if logfile is None:
+        log = Logger()
+    else:
+        log = Logger(logfile if mpi_size == 1
+                     else '.'.join([logfile, '%d' % mpi_rank]))
+
+    ysize, xsize = image.shape
+    # estimate typical stamp size to achieve minpixel^1/2 accuracy
+    hwstamp = int(ceil(sqrt(minpixel) / 2.) if hwstamp is None else hwstamp)
+
+    if rejseq == 'default':
+        rejseq = [(None, 4), (None, 4), (None, 4)]
+    elif rejseq == 'none' or rejseq is None:
+        rejseq = []
+
+    # compute stamp centers
+    fwstamp = 2 * hwstamp + 1
+    xs = np.empty(xsize // fwstamp + (xsize % fwstamp > 0), dtype='i')
+    ys = np.empty(ysize // fwstamp + (ysize % fwstamp > 0), dtype='i')
+    if mpi_rank == 0:
+        xs[:] = np.arange(0, xsize, fwstamp) + hwstamp
+        ys[:] = np.arange(0, ysize, fwstamp) + hwstamp
+    mpi_comm.Bcast([xs, MPI.INT])
+    mpi_comm.Bcast([ys, MPI.INT])
+
+    # number of rows for this rank to compute
+    n = np.array(len(ys) // mpi_size + (len(ys) % mpi_size > mpi_rank),
+                 dtype='i')
+    # indices of rows to compute in this rank
+    yidxs = np.arange(mpi_rank, len(ys), mpi_size, dtype='i')
+    # storage for computed result in this rank
+    res = np.empty((n * fwstamp, xsize), dtype='f')
+
+    for enum, yidx in enumerate(yidxs):
+        y = ys[yidx]
+        y1, y2 = max(0, y - hwstamp), min(ysize, y + hwstamp + 1)
+        y1res, y2res = enum * fwstamp, enum * fwstamp + y2 - y1
+
+        for x in xs:
+            x1, x2 = max(0, x - hwstamp), min(xsize, x + hwstamp + 1)
+
+            log.w('[%d:%d,%d:%d] (rank = %d)'
+                  % (x1, x2, y1, y2, mpi_rank))
+
+            rres = res[y1res:y2res, x1:x2]
+            rres[:] = image[y1:y2, x1:x2]
+
+            # om defines the pixels to fill
+            om = np.greater(objmask[y1:y2, x1:x2], 0)
+            if om.sum() == 0:
+                log.w('  no pixels to fill')
+                continue
+            if np.equal(badmask[y1:y2, x1:x2], 0).sum() == 0:
+                log.w('  entire stamp consists of bad pixels')
+                continue
+
+            # generate unscaled noise (background is not added yet),
+            # ensuring the generated noise is relatively well behaving
+            wg = np.copy(weight[y1:y2, x1:x2])
+            sig = np.sqrt(1. / wg)
+            mgoodsig = np.greater(sig, 0) * np.isfinite(sig)
+            if mgoodsig.sum() == 0:
+                log.w('  entire stamp consists of unweighted pixels')
+                continue
+            mbadsig = np.logical_not(mgoodsig)
+            sig[np.logical_not(mgoodsig)] = np.median(sig[mgoodsig])
+            fake = np.random.normal(0, sig)
+            # now, if sig is all nan (can happen on medianing if there
+            # are no good simga), fake will all be nan as well.
+
+            # sample local noise for scaling the noise empirically
+            grow = 0
+            for i in range(maxiter):
+                xx1, xx2 = max(0, x1 - grow), min(xsize, x2 + grow)
+                yy1, yy2 = max(0, y1 - grow), min(ysize, y2 + grow)
+
+                m = (np.equal(objmask[yy1:yy2, xx1:xx2], 0)
+                     * np.equal(badmask[yy1:yy2, xx1:xx2], 0))
+                if m.sum() >= minpixel:
+                    # copying looks like a waste of memory, but the
+                    # master images may be memory mapped, and if they
+                    # are not copied like this, indexing might fail
+                    # later within this function
+                    im = np.copy(image[yy1:yy2, xx1:xx2])
+                    bg = np.copy(bkgnd[yy1:yy2, xx1:xx2])
+                    if grow > 0:
+                        log.w('  grew stamp by %d' % grow)
+                    break
+
+                grow += hwgrow
+
+            if i + 1 == maxiter:
+                s = "hwgrow limit reached"
+                log.w("  " + s)
+                raise MaxIterationError(s)
+
+            # if smoothing, do it here
+            kern = (gauss_kern(gsig, gsig)
+                    if gsig is not None and gsig > 0
+                    else (boxcar_kern(boxfw, boxfw)
+                          if boxfw is not None and boxfw > 0
+                          else None))
+            if kern is not None:
+                fake = smooth_image(fake, kern)
+
+            if zoomscale is not None:
+                fake = zoom(fake, (zoomscale, zoomscale))
+
+            # scale factor to match empirical variance
+            diff = im[m] - bg[m]
+            if len(rejseq):
+                diff = sigmareject(diff, rejseq)
+            std_from_image = np.std(diff)
+            std_from_weight = np.std(fake)
+            factor = std_from_image / std_from_weight
+            if np.isnan(factor):
+                factor = 1.
+                log.w("  empirical / from weight = %f ; could not be computed"
+                      % factor)
+            else:
+                log.w("  empirical / from weight = %f" % factor)
+            log.w("         sigma from image = %f" % std_from_image)
+            log.w("        sigma from weight = %f" % std_from_weight)
+            # fill object masked pixels with fake background
+            rres[om] = (factor * fake[om] + bkgnd[y1:y2, x1:x2][om])
+
+    # gather results at root
+    counts = 0
+    indices = None
+    results = None
+    if mpi_rank == 0:
+        counts = np.empty(mpi_size, dtype='i')
+        indices = np.empty(len(ys), dtype='i')
+        results = np.empty((len(ys) * fwstamp, xsize), dtype='f')
+    mpi_comm.Gather([n, MPI.INT], [counts, MPI.INT])
+    mpi_comm.Gatherv([yidxs, MPI.INT], [indices, (counts, None), MPI.INT])
+    mpi_comm.Gatherv([res, MPI.FLOAT],
+                     [results, (counts * fwstamp * xsize, None), MPI.FLOAT])
+
+    # reconstruct full result at root
+    if mpi_rank == 0:
+        bgfilled = np.empty(image.shape, dtype=image.dtype)
+        for i in range(mpi_size):
+            ibeg = counts[:i].sum() if i > 0 else 0
+            for enum, yidx in enumerate(indices[ibeg:ibeg + counts[i]]):
+                y = ys[yidx]
+                y1, y2 = max(0, y - hwstamp), min(ysize, y + hwstamp + 1)
+                yi = (ibeg + enum) * fwstamp
+                bgfilled[y1:y2,:] = results[yi:yi+y2-y1,:]
+        return bgfilled
+
+
+def main(image, mask, weight, output, opts, memmap=True):
+    if os.path.exists(output) and not opts.overwrite:
+        raise IOError("File '%s' already exists." % output)
+    im = pf.open(image, memmap=memmap)[0].data
+    om = pf.open(mask, memmap=memmap)[0].data
+    wt = pf.open(weight, memmap=memmap)[0].data
+    bg = (pf.open(opts.background, memmap=memmap)[0].data
+          if opts.background is not None
+          else np.zeros(im.shape, dtype=im.dtype))
+    bm = (pf.open(opts.badpixelmask, memmap=memmap)[0].data
+          if opts.badpixelmask is not None
+          else np.zeros(im.shape, dtype='i'))
+
+    bgfilled = fillbg(im, om, wt, bg, bm, gsig=opts.gsig, boxfw=opts.boxfw,
+                      zoomscale=opts.zoomscale, hwstamp=opts.hwstamp,
+                      logfile=opts.logfile)
+    if mpi_rank == 0:
+        pf.PrimaryHDU(bgfilled).writeto(output, clobber=opts.overwrite)
+    mpi_comm.Barrier()
+
+
+if __name__ == '__main__':
+    usage = "usage: %prog [OPTIONS] IMAGE MASK WEIGHT OUTPUT"
+    p = OptionParser(usage=usage, version=__version__,
+                     description=(__doc__.strip()).split('\n')[0])
+    p.add_option('-b', '--background', type='string', default=None,
+                 help='input background image')
+    p.add_option('-m', '--badpixelmask', type='string', default=None,
+                 help='input bad pixel mask image')
+    p.add_option('--gsig', type='float', default=None,
+                 help='Gaussian filter sigma in pixels for smoothing')
+    p.add_option('--boxfw', type='float', default=None,
+                 help='boxcar filter full width in pixels for smoothing')
+    p.add_option('--zoomscale', type='float', default=None,
+                 help='zooming scale for imitating interpolation')
+    p.add_option('--hwstamp', type='int', default=None,
+                 help='half-width stamp size for estimating local background')
+    p.add_option('-o', '--overwrite', action='store_true', default=False,
+                 help='overwrite existing output file')
+    p.add_option('--logfile', type='string', default=None,
+                 help='log file name to save output')
+
+    opts, args = p.parse_args()
+    if len(args) != 4:
+        p.error('incorrect input arguments')
+    if opts.gsig is not None and opts.boxfw is not None:
+        p.error('only one smoothing filter can be applied')
+
+    image = args[0]
+    mask = args[1]
+    weight = args[2]
+    output = args[3]
+
+    main(image, mask, weight, output, opts)

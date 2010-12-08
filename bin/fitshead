@@ -1,0 +1,57 @@
+#!/usr/bin/env python2.6
+"""
+Show FITS header information.
+
+Examples:
+
+Show the summary of a FITS file:
+
+  $ fitshead image.fits
+
+Show a header with a specific extension:
+
+  $ fitshead image.fits 2
+  $ fitshead image.fits PRIMARY 0
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+import pyfits as pf
+
+
+__version__ = '20101202'
+__author__ = 'Taro Sato'
+__author_email__ = 'ubutsu@gmail.com'
+
+
+def main(filename, *idx):
+    hdus = pf.open(filename, memmap=True)
+
+    if len(idx) == 0:
+        hdus.info()
+        return
+
+    if len(idx) == 1:
+        hdr = hdus[idx[0]].header
+    else:
+        hdr = hdus[idx].header
+
+    ls = [x for x in str(hdr.ascardlist()).split("\n") if len(x.strip()) > 0]
+    print("\n".join(ls))
+
+
+if __name__ == '__main__':
+    usage = 'usage: %prog FITSFILE [EXTENSION]'
+    p = OptionParser(usage=usage, version=__version__,
+                     description=(__doc__.strip()).split('\n')[0])
+    opts, args = p.parse_args()
+    if len(args) < 1:
+        p.error('no FITS file specified')
+    filename = args[0]
+    eargs = tuple(args[1:]) if len(args) > 1 else ()
+    idx = ()
+    for each in eargs:
+        idx = idx + ((int(each),) if each.isdigit() else (each,))
+    main(filename, *idx)
