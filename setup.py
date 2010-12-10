@@ -23,7 +23,7 @@ __author_email__ = 'ubutsu@gmail.com'
 
 
 # Check installed Python version.
-python_ver = (2, 6, 4, 'final', 0)
+python_ver = (2, 6, 1, 'final', 0)
 if not hasattr(sys, 'version_info') or sys.version_info < python_ver:
     raise SystemExit('Python %s or later required.'
                      % '.'.join([str(c) for c in python_ver[:3]]))
