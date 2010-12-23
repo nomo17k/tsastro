@@ -35,9 +35,9 @@ def _parse_paramh():
 
         ts = substr.split('\n')
 
-        tss = (ts[0].strip()).split(',')
-        name = tss[0][1:-1]
-        desc = (''.join(tss[1:]))[1:-1]
+        tss = ts[0].split(',')
+        name = (tss[0].strip())[1:-1]
+        desc = ((''.join(tss[1:])).strip())[1:-1]
 
         ts = [t.strip() for t in (''.join(ts[1:])).split(',')]
 
