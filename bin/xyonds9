@@ -17,8 +17,8 @@ __version__ = '20101225'
 
 
 def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
-            xpaid=None,
-            comment='#', bounds=None, fits=None, labels=None, subsets=None):
+            xpaid=None, comment='#', bounds=None, fits=None,
+            labels=None, subsets=None):
     if fits is not None:
         try:
             with pf.open(filename) as f:
@@ -27,12 +27,13 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
             raise RuntimeError('file does not seem to be in FITS format')
     else:
         # assume input catalog is ascii, convert to fits binary table
-        data = np.loadtxt(filename, comments=comment)
+
+        # TODO: maybe add converters to save memory? might be hard to do...
+        data = np.loadtxt(filename, comments=comment, unpack=True)
         cs = []
         for i, column in enumerate(data):
-            cs.append(pf.Column(name=str(i + 1), format='E',
-                                array=column))
-        data = new_table(cs)[1].data
+            cs.append(pf.Column(name=str(i + 1), format='D', array=column))
+        data = pf.new_table(cs).data
 
     if bounds is not None:
         x1, x2, y1, y2 = bounds
