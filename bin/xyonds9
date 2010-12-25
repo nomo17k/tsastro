@@ -18,7 +18,7 @@ __version__ = '20101225'
 
 def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
             xpaid=None, comment='#', bounds=None, fits=None,
-            labels=None, subsets=None):
+            labels=None, subsets=None, subsetbits=None, save=None, dump=False):
     if fits is not None:
         try:
             with pf.open(filename) as f:
@@ -48,6 +48,12 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
                  * (data.field(c) <= np.array(hi, dtype=dtype)))
             data = data[m]
 
+    if subsetbits is not None:
+        for c, bit in subsetbits:
+            bit = int(bit)
+            m = (data.field(c) & bit == bit)
+            data = data[m]
+
     xs, ys = data.field(xcol), data.field(ycol)
     rs = (np.ones(xs.size) * 2. if radius is None
           else data.field(radius)) * radiusscale
@@ -65,29 +71,41 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
             cmd += (r"text='%s'" % text.replace("'", "_"))
         ds9.set(r'regions command "%s"' % cmd)
 
+        if dump:
+            print('%f %f' % (x, y))
+
+    if save:
+        ds9.set('regions save %s' % save)
+
 
 if __name__ == '__main__':
     usage = 'usage: %prog [OPTIONS] INPUT XCOL YCOL'
     p = OptionParser(usage=usage, description=__doc__,
                      version=__version__)
-    p.add_option('--fits', type='int', default=None,
-                 help='FITS binary extension')
-    p.add_option('-c', '--comment', default='#',
+    p.add_option('--bounds', type='float', nargs=4, default=None,
+                 help='coordinate bounds: x1 x2 y1 y2')
+    p.add_option('--comment', default='#',
                  help='character indicating comment line')
     p.add_option('--coordsys', default='image',
                  help='coordinate system for regions')
-    p.add_option('--xpaid', type='string', default=None,
-                 help='XPA method ID for running DS9')
-    p.add_option('--bounds', type='float', nargs=4, default=None,
-                 help='coordinate bounds: x1 x2 y1 y2')
+    p.add_option('-d', '--dump', action='store_true', default=False,
+                 help='dump x & y coordinates to stdout')
+    p.add_option('--fits', type='int', default=None,
+                 help='FITS binary extension')
+    p.add_option('--label', type='string', action='append',
+                 help='column name for the label to use for each point')
     p.add_option('--radius', type='string', default=None,
                  help='column for circular size')
     p.add_option('--radiusscale', type='float', default=1.,
                  help='multiplicative factor used for radius')
-    p.add_option('--label', type='string', action='append',
-                 help='column name for the label to use for each point')
+    p.add_option('--save', type='string', default=None,
+                 help='save DS9 regions to given file')
     p.add_option('--subset', type='string', nargs=3, action='append',
                  help='a subset definition: column lo hi')
+    p.add_option('--subsetbit', type='string', nargs=2, action='append',
+                 help='a subset definition: column bit')
+    p.add_option('--xpaid', type='string', default=None,
+                 help='XPA method ID for running DS9')
 
     opts, args = p.parse_args()
     if len(args) != 3:
@@ -101,4 +119,5 @@ if __name__ == '__main__':
             radius=opts.radius, radiusscale=opts.radiusscale,
             xpaid=opts.xpaid, comment=opts.comment,
             bounds=opts.bounds, fits=opts.fits, labels=opts.label,
-            subsets=opts.subset)
+            subsets=opts.subset, subsetbits=opts.subsetbit, save=opts.save,
+            dump=opts.dump)
