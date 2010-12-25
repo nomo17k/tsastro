@@ -18,7 +18,8 @@ __version__ = '20101225'
 
 def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
             xpaid=None, comment='#', bounds=None, fits=None,
-            labels=None, subsets=None, subsetbits=None, save=None, dump=False):
+            labels=None, subsets=None,
+            subsetbits=None, noadd=False, save=None, dump=False):
     if fits is not None:
         try:
             with pf.open(filename) as f:
@@ -49,9 +50,9 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
             data = data[m]
 
     if subsetbits is not None:
-        for c, bit in subsetbits:
-            bit = int(bit)
-            m = (data.field(c) & bit == bit)
+        for c, bit, value in subsetbits:
+            bit, value = int(bit), int(value)
+            m = ((data.field(c) & bit) == value * bit)
             data = data[m]
 
     xs, ys = data.field(xcol), data.field(ycol)
@@ -59,7 +60,7 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
           else data.field(radius)) * radiusscale
 
     ds9 = DS9() if xpaid is None else DS9(xpaid)
-    if labels is not None:
+    if labels is not None and not noadd:
         ds9.set('regions showtext yes')
 
     for o, x, y, r in zip(data, xs, ys, rs):
@@ -69,7 +70,9 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
         if labels:
             text = (' '.join([str(o.field(label)) for label in labels]))
             cmd += (r"text='%s'" % text.replace("'", "_"))
-        ds9.set(r'regions command "%s"' % cmd)
+
+        if not noadd:
+            ds9.set(r'regions command "%s"' % cmd)
 
         if dump:
             print('%f %f' % (x, y))
@@ -94,6 +97,8 @@ if __name__ == '__main__':
                  help='FITS binary extension')
     p.add_option('--label', type='string', action='append',
                  help='column name for the label to use for each point')
+    p.add_option('-n', '--noadd', action='store_true', default=False,
+                 help='do not show regions on DS9')
     p.add_option('--radius', type='string', default=None,
                  help='column for circular size')
     p.add_option('--radiusscale', type='float', default=1.,
@@ -102,8 +107,8 @@ if __name__ == '__main__':
                  help='save DS9 regions to given file')
     p.add_option('--subset', type='string', nargs=3, action='append',
                  help='a subset definition: column lo hi')
-    p.add_option('--subsetbit', type='string', nargs=2, action='append',
-                 help='a subset definition: column bit')
+    p.add_option('--subsetbit', type='string', nargs=3, action='append',
+                 help='a subset with bit set: column bit value')
     p.add_option('--xpaid', type='string', default=None,
                  help='XPA method ID for running DS9')
 
@@ -119,5 +124,8 @@ if __name__ == '__main__':
             radius=opts.radius, radiusscale=opts.radiusscale,
             xpaid=opts.xpaid, comment=opts.comment,
             bounds=opts.bounds, fits=opts.fits, labels=opts.label,
-            subsets=opts.subset, subsetbits=opts.subsetbit, save=opts.save,
+            subsets=opts.subset,
+            subsetbits=opts.subsetbit,
+            noadd=opts.noadd,
+            save=opts.save,
             dump=opts.dump)
