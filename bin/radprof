@@ -1,0 +1,105 @@
+#!/usr/bin/env python2.6
+"""
+Plot a radial profile.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+import matplotlib.pyplot as plt
+import numpy as np
+from numpy import sqrt
+import pyfits as pf
+
+
+__version__ = '20101225'
+
+
+def radprof(data, x, y, rmax=15, recenter=False):
+    yim, xim = data.shape
+
+    # one-index to zero-index
+    x, y = x - 1, y - 1
+
+    # compute extract region and find sub image
+    xmin, xmax = int(max(0, x - rmax)), int(min(xim, x + rmax))
+    ymin, ymax = int(max(0, y - rmax)), int(min(yim, y + rmax))
+    subreg = data[ymin:ymax, xmin:xmax]
+
+    if recenter:
+        xsum = subreg.sum(axis=0)
+        xsum2 = xsum.sum()
+        if xsum2 > 0.:
+            x = xmin + (np.arange(0, xmax-xmin, 1) * xsum).sum() / xsum2
+        ysum = subreg.sum(axis=1)
+        ysum2 = ysum.sum()
+        if ysum2 > 0.:
+            y = ymin + (np.arange(0, ymax-ymin, 1) * ysum).sum() / ysum2
+        xmin, xmax = int(max(0, x - rmax)), int(min(xim, x + rmax))
+        ymin, ymax = int(max(0, y - rmax)), int(min(yim, y + rmax))
+        subreg = data[ymin:ymax, xmin:xmax]
+
+    dx = xmax - xmin
+    dy = ymax - ymin
+
+    ys = np.repeat(np.arange(ymin, ymax), dx, axis=0).reshape((dy, dx))
+    xs = np.repeat(np.arange(xmin, xmax), dy, axis=0).reshape((dx, dy))
+    xs = xs.transpose()
+
+    rs = sqrt((xs - x)**2 + (ys - y)**2)
+
+    m = rs <= rmax
+    rs = rs[m]
+    vs = subreg[m]
+
+    return rs.ravel(), vs.ravel()
+
+
+def main(filename, coords, ext=0, rmax=15, recenter=False):
+    with pf.open(filename, memmap=True) as f:
+        data = f[0].data
+
+    for i, (x, y) in enumerate(coords):
+        rs, vs = radprof(data, x, y, rmax=rmax, recenter=recenter)
+
+        plt.figure(i + 1)
+        plt.plot(rs, vs, '.')
+        plt.xlabel('radius [pixel]')
+        plt.ylabel('count')
+        plt.title('%f %f' % (x, y))
+
+    plt.show()
+
+
+if __name__ == '__main__':
+    usage = 'usage: %prog [OPTIONS] IMAGE X Y'
+    p = OptionParser(usage=usage, description=__doc__,
+                     version=__version__)
+    p.add_option('--ext', type='int', default=0,
+                 help='FITS extension number')
+    p.add_option('-r', '--rmax', type='float', default=20,
+                 help='radius of the extracted circular region')
+    p.add_option('--recenter', action='store_true', default=False,
+                 help='recenter using the image profile')
+    p.add_option('--list', type='string', default=None,
+                 help='file containing a list of x and y coordinates')
+
+    opts, args = p.parse_args()
+
+    if opts.list:
+        if len(args) != 1:
+            p.error('invalid arguments')
+        coords = []
+        with open(opts.list) as f:
+            for o in f:
+                ts = o.split()
+                coords.append((float(ts[0]), float(ts[1])))
+    else:
+        if len(args) != 3:
+            p.error('invalid arguments')
+        coords = [(float(args[1]), float(args[2]))]
+    
+    filename = args[0]
+
+    main(filename, coords, rmax=opts.rmax, ext=opts.ext, recenter=opts.recenter)
