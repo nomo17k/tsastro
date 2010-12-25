@@ -1,0 +1,85 @@
+#!/usr/bin/env python2.6
+"""
+Send points defined in a white space delimited text file or a FITS
+binary extension to DS9 as circular regions.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+import numpy as np
+import pyfits as pf
+from ds9 import ds9 as DS9
+
+
+__version__ = '20101224'
+
+
+def main(xcol, ycol, filename, radius=None, radiusscale=1., xpaid=None,
+         comment='#', bounds=None, fits=None):
+    if fits is not None:
+        try:
+            with pf.open(filename) as f:
+                data = f[int(fits)].data
+        except:
+            raise RuntimeError('file does not seem to be in FITS format')
+        xs, ys = data.field(xcol), data.field(ycol)
+        rs = (np.ones(xs.size) * 2. if radius is None
+              else data.field(radius)) * radiusscale
+    else:
+        # assume input catalog is ascii
+        data = np.loadtxt(filename, comments=comment)
+        xs, ys = data[int(xcol) - 1], data[int(ycol) - 1]
+        rs = (np.ones(xs.size) * 2. if radius is None
+              else data[int(radius) - 1]) * radiusscale
+
+    if bounds is not None and len(bounds) == 4:
+        x1, x2, y1, y2 = bounds
+        m = ((x1 <= xs) * (xs <= x2) * (y1 <= ys) * (ys <= y2))
+        xs, ys, rs = xs[m], ys[m], rs[m]
+        
+    ds9 = DS9(xpaid)
+    ds9.set('regions system image')
+
+    for x, y, r in zip(xs, ys, rs):
+        ds9.set('regions command {circle %.2f %.2f %.2f}' % (x, y, r))
+
+
+if __name__ == '__main__':
+    usage = 'usage: %prog [OPTIONS] INPUT XCOL YCOL'
+    p = OptionParser(usage=usage, description=__doc__,
+                     version=__version__)
+    p.add_option('--fits', action='store', type='int', default=None,
+                 help='FITS binary extension')
+    p.add_option('-c', '--comment',
+                 action='store', default='#',
+                 help='character indicating comment line')
+    #p.add_option('-i', '--image', dest='image_mode',
+    #             action='store_true',
+    #             help='column values are in image coordinates')
+    #p.add_option('-p', '--physical', dest='phys_mode',
+    #             help='column values are in physical coordinates')
+    #p.add_option('-w', '--wcs', dest='wcs_mode',
+    #             action='store_true',
+    #             help='column values are on WCS')
+    p.add_option('--xpaid', type='string', action='store', default=None,
+                 help='XPA method ID for running DS9')
+    p.add_option('--bounds', type='float', nargs=4, action='store',
+                 default=None,
+                 help='coordinate bounds in x1 x2 y1 y2')
+    p.add_option('--radius', type='string', action='store',
+                 default=None,
+                 help='column for circular size')
+    p.add_option('--radiusscale', type='float', action='store', default=1.,
+                 help='multiplicative factor used for radius')
+
+    opts, args = p.parse_args()
+
+    fname = args[0]
+    xcol = args[1]
+    ycol = args[2]
+
+    main(xcol, ycol, fname, radius=opts.radius,
+         radiusscale=opts.radiusscale, xpaid=opts.xpaid, comment=opts.comment,
+         bounds=opts.bounds, fits=opts.fits)
