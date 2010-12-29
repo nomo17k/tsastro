@@ -1,0 +1,110 @@
+#!/usr/bin/env python2.6
+"""
+Add artificially generated object(s) to an input image.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+import warnings
+import pyfits as pf
+from tsastro.morph2d import Gaussian, GIM2D
+
+
+__version__ = '20101228'
+
+
+class InvalidModelError(Exception): pass
+
+
+def parsemodel(tokens):
+    """
+    Given tokens of strings (either from input arguments or a file),
+    convert them to model instances.
+    """
+    # model id in input, class, number of input args (x, y, plus params)
+    modeltable = {'gauss': (Gaussian, 2),
+                  'gim2d': (GIM2D, 9)}
+    models = []
+    idx = 0
+    while 1:
+        if idx >= len(tokens):
+            break
+        x, y, t = tokens[idx:idx + 3]
+        if t not in modeltable:
+            raise InvalidModelError('invalid input model format')
+        m, npar = modeltable[t]
+        pars = [float(p) for p in tokens[idx + 3: idx + 3 + npar]]
+        models.append((float(x), float(y), m(*pars)))
+        idx += npar + 3
+    return models
+
+
+def main(inim, outim, models, save=False, imext=0):
+    with pf.open(inim, memmap=True) as f:
+        im = f[imext].data
+        hdr = f[imext].header
+
+    if save:
+        ids, xs, ys, ms, ps = [], [], [], [], []
+    for i, (x, y, model) in enumerate(models):
+        im = model.generate(x, y, im)
+        if save:
+            ids.append(i + 1)
+            xs.append(x)
+            ys.append(y)
+            ms.append(model.name)
+            ps.append(model.parameters)
+
+    if save:
+        cs = []
+        a = cs.append
+        a(pf.Column(name='id', format='J', array=xs))
+        a(pf.Column(name='x', format='E', array=xs))
+        a(pf.Column(name='y', format='E', array=ys))
+        a(pf.Column(name='model', format='16A', array=ms))
+        a(pf.Column(name='param', format='PE(16)', array=ps))
+        bt = pf.new_table(cs)
+        bt.header.update('EXTNAME', 'ARTOBJ CATALOG')
+
+    hdus = (pf.HDUList([pf.PrimaryHDU(im, hdr), bt]) if save
+            else pf.HDUList([pf.PrimaryHDU(im, hdr)]))
+
+    # add info to header
+    hdr.update('AOBJINFO', 'addartobj [v%s] by Taro Sato' % __version__)
+    hdr.update('AOBINPUT', inim, comment='input image used')
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        hdus.writeto(outim, clobber=True)
+
+
+if __name__ == '__main__':
+    usage = ("usage: %prog [OPTIONS] INPUT OUTPUT"
+             " [X Y MODEL PAR1 PAR2 ... [X Y MODEL PAR1 PAR2 ...]]")
+    p = OptionParser(usage=usage, version=__version__,
+                     description=__doc__)
+    p.add_option('-f', '--file', type='string', default=None,
+                 help='read models from a file')
+    p.add_option('-s', '--save', action='store_true', default=False,
+                 help='save model into to a FITS extention')
+
+    opts, args = p.parse_args()
+    if opts.file is None:
+        if len(args) <= 2:
+            p.error('invalid arguments')
+        models = args[2:]
+    else:
+        models = [] 
+        with open(opts.file) as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                models.extend(line.strip().split())
+    models = parsemodel(models)
+
+    inim = args[0]
+    outim = args[1]
+
+    main(inim, outim, models, save=opts.save)
