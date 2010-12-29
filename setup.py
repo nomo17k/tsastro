@@ -17,7 +17,7 @@ if os.path.exists('MANIFEST'): os.remove('MANIFEST')
 from distutils.core import setup, Extension
 
 
-__version__ = '20101208'
+__version__ = '20101228'
 __author__ = 'Taro Sato'
 __author_email__ = 'ubutsu@gmail.com'
 
@@ -42,8 +42,12 @@ def get_scripts():
     """
     Return paths of scripts to install
     """
-    paths = ['bin/fitshead',
-             'bin/simbgim']
+    paths = ['bin/addartobj',
+             'bin/fitshead',
+             'bin/radprof',
+             'bin/sexcat2fits',
+             'bin/simbgim',
+             'bin/xyonds9']
     #paths.extend(glob.glob('bin/*.py')]
     return paths
 
