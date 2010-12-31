@@ -1,0 +1,46 @@
+#!/usr/bin/env python2.6
+"""
+Convolve an input image with a Gaussian kernel.
+
+This script uses scipy.ndimage.gaussian_filter.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+import warnings
+import pyfits as pf
+from scipy.ndimage import gaussian_filter
+
+
+__version__ = '20101230'
+
+
+def convgauss(inim, outim, xsigma, ysigma, ext=0):
+    with pf.open(inim, memmap=True) as f:
+        img = f[ext].data
+        hdr = f[ext].header
+    convolved = gaussian_filter(img, [ysigma, xsigma])
+    hdr.update('CONVSIGX', xsigma, comment='convolution kernel size in x')
+    hdr.update('CONVSIGY', ysigma, comment='convolution kernel size in y')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        pf.PrimaryHDU(convolved, hdr).writeto(outim, clobber=True)
+
+
+if __name__ == '__main__':
+    usage = 'usage: %prog [OPTIONS] INPUT OUTPUT SIGMA [SIGMA2]'
+    p = OptionParser(usage=usage, description=__doc__, version=__version__)
+
+    opts, args = p.parse_args()
+
+    if not (3 <= len(args) <= 4):
+        p.error('invalid arguments')
+
+    inim = args[0]
+    outim = args[1]
+    xsigma = float(args[2])
+    ysigma = float(args[3]) if len(args) == 4 else xsigma
+
+    convgauss(inim, outim, xsigma, ysigma)
