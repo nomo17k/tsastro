@@ -41,7 +41,10 @@ def fit_moffat(xs, ys):
         a = p[1]
         b = p[2]
         return amp * (1. + (x / a)**2)**(-b)
-    parfin = fit_function(xs, ys, moffat, [max(ys), 4., 4.])
+    try:
+        parfin = fit_function(xs, ys, moffat, [max(ys), 4., 4.])
+    except BadFitError:
+        return None
     amp, alpha, beta = parfin
     fwhm = 2. * alpha * np.sqrt(2**(1./beta) - 1.)
     sigma = fwhm / SIG2FWHM
@@ -133,9 +136,15 @@ class Plot(object):
         rs, vs, subreg = radprof(self.data, x, y,
                                  rmax=self.rmax, recenter=self.recenter)
 
-        frs, fvs, pars = fit_moffat(rs, vs)
-        amp, alpha, beta = pars
-        mfwhm = 2. * alpha * sqrt(2**(1. / beta) - 1.)
+        res = fit_moffat(rs, vs)
+        if res is not None:
+            frs, fvs, pars = fit_moffat(rs, vs)
+            amp, alpha, beta = pars
+            mfwhm = 2. * alpha * sqrt(2**(1. / beta) - 1.)
+        else:
+            frs, fvs, pars = [], [], [0, 0, 0]
+            amp, alpha, beta = 0, 0, 0
+            mfwhm = 0
 
         plt.cla()
         plt.plot(frs, fvs, '-')
