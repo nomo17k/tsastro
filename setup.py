@@ -17,7 +17,7 @@ if os.path.exists('MANIFEST'): os.remove('MANIFEST')
 from distutils.core import setup, Extension
 
 
-__version__ = '20101228'
+__version__ = '20110101'
 __author__ = 'Taro Sato'
 __author_email__ = 'ubutsu@gmail.com'
 
@@ -43,6 +43,7 @@ def get_scripts():
     Return paths of scripts to install
     """
     paths = ['bin/addartobj',
+             'bin/convgauss',
              'bin/fitshead',
              'bin/radprof',
              'bin/sexcat2fits',

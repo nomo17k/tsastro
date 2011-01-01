@@ -8,13 +8,45 @@ from __future__ import print_function
 #from __future__ import unicode_literals
 from optparse import OptionParser
 from sys import stdin
+from ds9 import ds9 as DS9
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import sqrt
 import pyfits as pf
+from scipy.optimize import leastsq
 
 
-__version__ = '20101225'
+__version__ = '20101231'
+
+
+SIG2FWHM = 2.35482
+
+
+class BadFitError(Exception): pass
+
+
+def fit_function(xs, ys, fitfn, par):
+    errfn = lambda p, x, y: (y - fitfn(p, x))
+    out = leastsq(errfn, par, args=(xs, ys), full_output=0, warning=False)
+    parfin = out[0]
+    ierr = out[-1]
+    if ierr not in [1, 2, 3, 4]:
+        raise BadFitError('bad fit result')
+    return parfin
+
+
+def fit_moffat(xs, ys):
+    def moffat(p, x):
+        amp = p[0]
+        a = p[1]
+        b = p[2]
+        return amp * (1. + (x / a)**2)**(-b)
+    parfin = fit_function(xs, ys, moffat, [max(ys), 4., 4.])
+    amp, alpha, beta = parfin
+    fwhm = 2. * alpha * np.sqrt(2**(1./beta) - 1.)
+    sigma = fwhm / SIG2FWHM
+    xxs = np.linspace(0, 4.* sigma, num=len(xs)*3)
+    return xxs, moffat(parfin, xxs), parfin
 
 
 def radprof(data, x, y, rmax=15, recenter=False):
@@ -54,37 +86,127 @@ def radprof(data, x, y, rmax=15, recenter=False):
     rs = rs[m]
     vs = subreg[m]
 
-    return rs.ravel(), vs.ravel()
+    return rs.ravel(), vs.ravel(), subreg
 
 
-def main(filename, coords, ext=0, rmax=15, recenter=False):
-    with pf.open(filename, memmap=True) as f:
-        data = f[0].data
+class Plot(object):
 
-    for i, (x, y) in enumerate(coords):
-        rs, vs = radprof(data, x, y, rmax=rmax, recenter=recenter)
+    fignum = {'radprof': 101, 'contour': 102}
+    
+    def __init__(self, data, coords, rmax=15, recenter=False,
+                 xpaid=None, pan=False):
+        self.data = data
+        self.coords = coords
+        self.rmax = rmax
+        self.recenter = recenter
+        self.xpaid = xpaid
+        self.pan = pan
+        self.ds9 = None if xpaid is None else DS9(xpaid)
+        self.idx = 0
 
-        plt.figure(i + 1)
+        # make plot
+        self.init_figure()
+
+    def init_figure(self):
+        fig1 = plt.figure(self.fignum['radprof'])
+        fig1.canvas.set_window_title('Radial Profile')
+        fig1.canvas.mpl_connect('key_release_event', self.key_release)
+        plt.figtext(.5, .99, 'use arrow keys to plot next object',
+                    va='top', ha='center')
+
+        fig2 = plt.figure(self.fignum['contour'])
+        fig2.canvas.set_window_title('Contour Plot')
+        fig2.canvas.mpl_connect('key_release_event', self.key_release)
+        self.draw()
+        plt.show()
+
+    def draw(self):
+        plt.figure(self.fignum['radprof'])
+        x, y = self.coords[self.idx]
+        rs, vs, subreg = radprof(self.data, x, y,
+                                 rmax=self.rmax, recenter=self.recenter)
+
+        frs, fvs, pars = fit_moffat(rs, vs)
+        amp, alpha, beta = pars
+        mfwhm = 2. * alpha * sqrt(2**(1. / beta) - 1.)
+
+        plt.cla()
+        plt.plot(frs, fvs, '-')
         plt.plot(rs, vs, '.')
         plt.xlabel('radius [pixel]')
         plt.ylabel('count')
-        plt.title('%f %f' % (x, y))
+        plt.title('%.2f %.2f [%d / %d]'
+                  % (x, y, self.idx + 1, len(self.coords)))
 
-    plt.show()
+        xlo, xhi = plt.xlim()
+        ylo, yhi = plt.ylim()
+        xx, yy = xlo + (xhi - xlo) * .75, ylo + (yhi - ylo) * .95
+        dy = (yhi - ylo) * .05
+
+        plt.text(xx, yy - 0.*dy, 'A = %.2f' % pars[0], ha='center')
+        plt.text(xx, yy - 1.*dy, 'alpha = %.3f' % pars[1], ha='center')
+        plt.text(xx, yy - 2.*dy, 'beta = %.3f' % pars[2], ha='center')
+        plt.text(xx, yy - 3.*dy, 'MFWHM = %.3f' % mfwhm, ha='center')
+
+        plt.draw()
+
+        plt.figure(self.fignum['contour'])
+        plt.cla()
+        plt.imshow(subreg, interpolation='nearest')
+
+        plt.draw()
+
+        if self.ds9:
+            ds9 = self.ds9
+            ds9.set('regions system image')
+            ds9.set('regions select group radprof')
+            ds9.set('regions delete select')
+
+            cmd = (r'regions command'
+                   r' {circle(%.2f, %.2f, %.2f) # color=red tag=radprof}'
+                   % (x, y, self.rmax))
+            ds9.set(cmd)
+
+            if self.pan:
+                ds9.set('pan to %.2f %.2f image' % (x, y))
+
+    def key_release(self, evt):
+        if evt.key == 'right':
+            self.idx += 1
+        elif evt.key == 'left':
+            self.idx -= 1
+        elif evt.key == 'q':
+            exit(0)
+        self.idx = 0 if self.idx >= len(self.coords) else self.idx
+        self.idx = len(self.coords) - 1 if self.idx < 0 else self.idx
+        self.draw()
+
+
+def main(filename, coords, ext=0, rmax=15, recenter=False,
+         xpaid=None, pan=False):
+    # read image file
+    with pf.open(filename, memmap=True) as f:
+        data = f[0].data
+    p = Plot(data, coords, rmax=rmax, recenter=recenter, xpaid=xpaid, pan=pan)
 
 
 if __name__ == '__main__':
     usage = 'usage: %prog [OPTIONS] IMAGE X Y'
-    p = OptionParser(usage=usage, description=__doc__,
-                     version=__version__)
+    p = OptionParser(usage=usage, description=__doc__, version=__version__)
     p.add_option('--ext', type='int', default=0,
-                 help='FITS extension number')
-    p.add_option('-r', '--rmax', type='float', default=20,
+                 help='FITS extension number of the input image')
+    p.add_option('-r', '--rmax', type='float', default=12,
                  help='radius of the extracted circular region')
     p.add_option('--recenter', action='store_true', default=False,
                  help='recenter using the image profile')
     p.add_option('--list', type='string', default=None,
                  help='file containing a coordinates list or STDIN')
+
+    # only relevant if ds9 is running
+    p.add_option('--xpaid', type='string', default=None,
+                 help='XPA ID of a DS9 instance')
+    p.add_option('--pan', action='store_true', default=False,
+                 help='center the source within DS9')
 
     opts, args = p.parse_args()
 
@@ -109,4 +231,5 @@ if __name__ == '__main__':
     
     filename = args[0]
 
-    main(filename, coords, rmax=opts.rmax, ext=opts.ext, recenter=opts.recenter)
+    main(filename, coords, rmax=opts.rmax, ext=opts.ext, recenter=opts.recenter,
+         xpaid=opts.xpaid, pan=opts.pan)
