@@ -10,7 +10,7 @@ from __future__ import print_function
 from optparse import OptionParser
 import numpy as np
 import pyfits as pf
-from ds9 import ds9 as DS9
+from ds9 import ds9 as DS9, ds9_targets
 
 
 __version__ = '20101231'
@@ -69,7 +69,12 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
     rs = (np.ones(xs.size) * 2. if radius is None
           else data.field(radius)) * radiusscale
 
-    ds9 = DS9() if xpaid is None else DS9(xpaid)
+    if xpaid is None:
+        ts = ds9_targets()
+        ds9 = DS9(ts[0]) if len(ts) else DS9()
+    else:
+        ds9 = DS9(xpaid)
+
     if labels is not None and not noadd:
         ds9.set('regions showtext yes')
 
@@ -107,7 +112,7 @@ if __name__ == '__main__':
                  help='read from a FITS binary extension')
     p.add_option('--label', type='string', action='append',
                  help='column name for the label to use for each point')
-    p.add_option('-n', '--noadd', action='store_true', default=False,
+    p.add_option('--noadd', action='store_true', default=False,
                  help='do not show regions on DS9')
     p.add_option('--npy', action='store_true', default=False,
                  help='read from a .npy file')

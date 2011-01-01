@@ -8,7 +8,7 @@ from __future__ import print_function
 #from __future__ import unicode_literals
 from optparse import OptionParser
 from sys import stdin
-from ds9 import ds9 as DS9
+from ds9 import ds9 as DS9, ds9_targets
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import sqrt
@@ -94,27 +94,34 @@ class Plot(object):
     fignum = {'radprof': 101, 'contour': 102}
     
     def __init__(self, data, coords, rmax=15, recenter=False,
-                 xpaid=None, pan=False):
+                 xpaid=None, pan=False, dpi=None):
         self.data = data
         self.coords = coords
         self.rmax = rmax
         self.recenter = recenter
         self.xpaid = xpaid
         self.pan = pan
-        self.ds9 = None if xpaid is None else DS9(xpaid)
+
+        if xpaid is None:
+            ts = ds9_targets()
+            ds9 = DS9(ts[0]) if len(ts) else DS9()
+        else:
+            ds9 = DS9(xpaid)
+        self.ds9 = ds9
+
         self.idx = 0
 
         # make plot
-        self.init_figure()
+        self.init_figure(dpi=dpi)
 
-    def init_figure(self):
-        fig1 = plt.figure(self.fignum['radprof'])
+    def init_figure(self, dpi=None):
+        fig1 = plt.figure(self.fignum['radprof'], dpi=dpi)
         fig1.canvas.set_window_title('Radial Profile')
         fig1.canvas.mpl_connect('key_release_event', self.key_release)
         plt.figtext(.5, .99, 'use arrow keys to plot next object',
                     va='top', ha='center')
 
-        fig2 = plt.figure(self.fignum['contour'])
+        fig2 = plt.figure(self.fignum['contour'], dpi=dpi)
         fig2.canvas.set_window_title('Contour Plot')
         fig2.canvas.mpl_connect('key_release_event', self.key_release)
         self.draw()
@@ -183,16 +190,19 @@ class Plot(object):
 
 
 def main(filename, coords, ext=0, rmax=15, recenter=False,
-         xpaid=None, pan=False):
+         xpaid=None, pan=False, dpi=None):
     # read image file
     with pf.open(filename, memmap=True) as f:
         data = f[0].data
-    p = Plot(data, coords, rmax=rmax, recenter=recenter, xpaid=xpaid, pan=pan)
+    p = Plot(data, coords, rmax=rmax, recenter=recenter, xpaid=xpaid, pan=pan,
+             dpi=dpi)
 
 
 if __name__ == '__main__':
     usage = 'usage: %prog [OPTIONS] IMAGE X Y'
     p = OptionParser(usage=usage, description=__doc__, version=__version__)
+    p.add_option('--dpi', type='int', default=None,
+                 help='DPI for matplotlib figure')
     p.add_option('--ext', type='int', default=0,
                  help='FITS extension number of the input image')
     p.add_option('-r', '--rmax', type='float', default=12,
@@ -232,4 +242,4 @@ if __name__ == '__main__':
     filename = args[0]
 
     main(filename, coords, rmax=opts.rmax, ext=opts.ext, recenter=opts.recenter,
-         xpaid=opts.xpaid, pan=opts.pan)
+         xpaid=opts.xpaid, pan=opts.pan, dpi=opts.dpi)
