@@ -71,7 +71,7 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
 
     if xpaid is None:
         ts = ds9_targets()
-        ds9 = DS9(ts[0]) if len(ts) else DS9()
+        ds9 = DS9(ts[0]) if ts is not None and len(ts) else DS9()
     else:
         ds9 = DS9(xpaid)
 
@@ -79,7 +79,8 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
         ds9.set('regions showtext yes')
 
     for o, x, y, r in zip(data, xs, ys, rs):
-        rstr = (r'%f\"' if system in ['wcs', 'fk4', 'fk5', 'galactic', 'ecliptic']
+        rstr = (r'%f\"' if system in ['wcs', 'fk4', 'fk5', 'galactic',
+                                      'ecliptic']
                 else r'%f') % r
         cmd = (r"%s;circle(%f %f %s) # " % (system, x, y, rstr))
         if labels:
