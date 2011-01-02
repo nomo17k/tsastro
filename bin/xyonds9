@@ -19,7 +19,7 @@ __version__ = '20101231'
 def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
             xpaid=None, comment='#', bounds=None, fits=None, npy=False,
             labels=None, subsets=None,
-            subsetbits=None, noadd=False, save=None, dump=False):
+            subsetbits=None, noadd=False, clear=False, save=None, dump=False):
     if fits is not None:
         try:
             with pf.open(filename) as f:
@@ -75,6 +75,9 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
     else:
         ds9 = DS9(xpaid)
 
+    if clear:
+        ds9.set('regions delete all')
+
     if labels is not None and not noadd:
         ds9.set('regions showtext yes')
 
@@ -103,6 +106,8 @@ if __name__ == '__main__':
                      version=__version__)
     p.add_option('--bounds', type='float', nargs=4, default=None,
                  help='coordinate bounds: x1 x2 y1 y2')
+    p.add_option('--clear', action='store_true', default=False,
+                 help='clear existing regions on DS9')
     p.add_option('--comment', default='#',
                  help='character indicating comment line')
     p.add_option('--coordsys', default='image',
@@ -149,5 +154,6 @@ if __name__ == '__main__':
             subsets=opts.subset,
             subsetbits=opts.subsetbit,
             noadd=opts.noadd,
+            clear=opts.clear,
             save=opts.save,
             dump=opts.dump)
