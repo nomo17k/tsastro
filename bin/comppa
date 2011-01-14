@@ -1,0 +1,56 @@
+#!/usr/bin/env python2.6
+"""
+Compute the position angle of an object relative to another.
+
+The position angle of the object at (RA2, DEC2) is computed relative
+to the object at (RA1, DEC1).  The coordinate values need to be in
+units of degrees.
+
+TODO:
+
+Accept other types of coordinate values (e.g., sexagesimal, hours for
+RA, etc.).
+
+Reference:
+
+POSANG.PRO of the IDL Astronomy User's Library.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+from numpy import arctan2, cos, pi, sin, tan
+
+
+__version__ = '20110114'
+
+
+D2R = pi / 180.
+
+
+def comppa(ra1, dec1, ra2, dec2):
+    r1, d1 = ra1 * D2R, dec1 * D2R
+    r2, d2 = ra2 * D2R, dec2 * D2R
+
+    dr = r2 - r1
+    angle = arctan2(sin(dr), (cos(d1) * tan(d2) - sin(d1) * cos(dr)))
+
+    print(angle / D2R)
+
+
+if __name__ == '__main__':
+    usage = 'usage: %prog [OPTIONS] RA1 DEC1 RA2 DEC2'
+    p = OptionParser(usage=usage, description=__doc__, version=__version__)
+
+    opts, args = p.parse_args()
+
+    if not (len(args) == 4):
+        p.error('invalid arguments')
+
+    ra1 = float(args[0])
+    dec1 = float(args[1])
+    ra2 = float(args[2])
+    dec2 = float(args[3])
+
+    comppa(ra1, dec1, ra2, dec2)
