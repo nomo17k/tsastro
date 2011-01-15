@@ -172,7 +172,8 @@ def fillbg(image, objmask, weight, bkgnd, badmask,
             rres[:] = image[y1:y2, x1:x2]
 
             # om defines the pixels to fill
-            om = np.greater(objmask[y1:y2, x1:x2], 0)
+            om = (np.greater(objmask[y1:y2, x1:x2], 0)
+                  * np.greater(badmask[y1:y2, x1:x2], 0))
             if om.sum() == 0:
                 log.w('  no pixels to fill')
                 continue
