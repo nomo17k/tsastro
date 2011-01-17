@@ -83,6 +83,8 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, imext=0):
         warnings.simplefilter('ignore')
         hdus.writeto(outim, clobber=True)
 
+    # TODO: maybe there is a better way to keep the temporary file
+    # alive till this point.
     if tmpfile is not None:
         tmpfile.close()
 
