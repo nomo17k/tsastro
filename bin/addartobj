@@ -64,7 +64,7 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, imext=0):
     if save:
         cs = []
         a = cs.append
-        a(pf.Column(name='id', format='J', array=xs))
+        a(pf.Column(name='id', format='J', array=ids))
         a(pf.Column(name='x', format='E', array=xs))
         a(pf.Column(name='y', format='E', array=ys))
         a(pf.Column(name='model', format='16A', array=ms))
