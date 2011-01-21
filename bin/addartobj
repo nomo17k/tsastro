@@ -55,7 +55,7 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, modelfile=None,
         ids, xs, ys, ms, ps = [], [], [], [], []
     for i, (x, y, model) in enumerate(models):
         im = model.generate(x, y, im)
-        if save:
+        if save or modelfile is not None:
             ids.append(i + 1)
             xs.append(x)
             ys.append(y)
