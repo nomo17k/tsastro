@@ -16,7 +16,7 @@ import pyfits as pf
 from tsastro.morph2d import Gaussian, GIM2D
 
 
-__version__ = '20101228'
+__version__ = '20110121'
 
 
 class InvalidModelError(Exception): pass
@@ -45,12 +45,13 @@ def parsemodel(tokens):
     return models
 
 
-def addartobj(inim, outim, models, save=False, tmpfile=None, imext=0):
+def addartobj(inim, outim, models, save=False, tmpfile=None, modelfile=None,
+              imext=0):
     with pf.open(inim, memmap=True) as f:
         im = f[imext].data
         hdr = f[imext].header
 
-    if save:
+    if save or modelfile is not None:
         ids, xs, ys, ms, ps = [], [], [], [], []
     for i, (x, y, model) in enumerate(models):
         im = model.generate(x, y, im)
@@ -61,7 +62,7 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, imext=0):
             ms.append(model.name)
             ps.append(model.parameters)
 
-    if save:
+    if save or modelfile is not None:
         cs = []
         a = cs.append
         a(pf.Column(name='id', format='J', array=ids))
@@ -78,6 +79,9 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, imext=0):
 
     hdus = (pf.HDUList([pf.PrimaryHDU(im, hdr), bt]) if save
             else pf.HDUList([pf.PrimaryHDU(im, hdr)]))
+
+    if modelfile is not None:
+        bt.writeto(modelfile, clobber=True)
 
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
@@ -102,6 +106,8 @@ if __name__ == '__main__':
                  help='generate a new image of given shape')
     p.add_option('-s', '--save', action='store_true', default=False,
                  help='save models into to a FITS extention')
+    p.add_option('--modelfile', default=None,
+                 help='save models as a FITS file')
 
     opts, args = p.parse_args()
 
@@ -133,4 +139,5 @@ if __name__ == '__main__':
 
     outim = args[nargs - 1]
 
-    addartobj(inim, outim, models, save=opts.save, tmpfile=tmpfile)
+    addartobj(inim, outim, models, save=opts.save, tmpfile=tmpfile,
+              modelfile=opts.modelfile)
