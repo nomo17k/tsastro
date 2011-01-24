@@ -13,7 +13,7 @@ import pyfits as pf
 from ds9 import ds9 as DS9, ds9_targets
 
 
-__version__ = '20101231'
+__version__ = '20110124'
 
 
 def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
@@ -26,7 +26,7 @@ def xyonds9(xcol, ycol, filename, system='image', radius=None, radiusscale=1.,
                 data = f[int(fits)].data
         except:
             raise RuntimeError('file does not seem to be in FITS format')
-    if npy:
+    elif npy:
         data = np.load(filename)
         cs = []
         for i, name in enumerate(data.dtype.names):
