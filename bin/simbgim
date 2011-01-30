@@ -280,7 +280,7 @@ def fillbg(image, objmask, weight, bkgnd, badmask,
 def main(image, mask, weight, output, opts, memmap=True):
     if os.path.exists(output) and not opts.overwrite:
         raise IOError("File '%s' already exists." % output)
-    im = pf.open(image, memmap=memmap)[0].data
+    im, imhdr = pf.getdata(image, 0, header=True)
     om = pf.open(mask, memmap=memmap)[0].data
     wt = pf.open(weight, memmap=memmap)[0].data
     bg = (pf.open(opts.background, memmap=memmap)[0].data
@@ -294,7 +294,7 @@ def main(image, mask, weight, output, opts, memmap=True):
                       zoomscale=opts.zoomscale, hwstamp=opts.hwstamp,
                       logfile=opts.logfile)
     if mpi_rank == 0:
-        pf.PrimaryHDU(bgfilled).writeto(output, clobber=opts.overwrite)
+        pf.writeto(output, bgfilled, imhdr, clobber=opts.overwrite)
     mpi_comm.Barrier()
 
 
