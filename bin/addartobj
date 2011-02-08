@@ -1,8 +1,6 @@
 #!/usr/bin/env python2.6
 """
 Add artificially generated object(s) to an input image.
-
-
 """
 from __future__ import absolute_import
 from __future__ import division
@@ -81,7 +79,9 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, modelfile=None,
             else pf.HDUList([pf.PrimaryHDU(im, hdr)]))
 
     if modelfile is not None:
-        bt.writeto(modelfile, clobber=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            bt.writeto(modelfile, clobber=True)
 
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
