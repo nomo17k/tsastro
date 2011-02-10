@@ -33,7 +33,11 @@ def xyonds9(xcol, ycol, filename, system='image',
         for i, name in enumerate(data.dtype.names):
             t = data[name].dtype.type
             # TODO: edit this to convert more types properly
-            fmt = {np.float64: 'D',
+            fmt = {np.int16: 'I',
+                   np.int32: 'J',
+                   np.int64: 'K',
+                   np.float32: 'E',
+                   np.float64: 'D',
                    np.string_: 'A'}[t]
             cs.append(pf.Column(name=name, format=fmt, array=data[name]))
         data = pf.new_table(cs).data
