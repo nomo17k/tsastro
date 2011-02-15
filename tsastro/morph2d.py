@@ -135,32 +135,32 @@ class GIM2D(Morph2D):
     1 should be referred for detail.
     """
 
-    def __init__(self, ftot=1., bf=.5, re=6., el=.5, pab=0., rd=10., inc=0.,
-                 pad=pi/4., n=4., hwsigma=5., **kwargs):
+    def __init__(self, ftot=1., bf=.5, n=4., re=6., el=.5, pab=0., rd=10.,
+                 inc=0., pad=0., hwsigma=5., **kwargs):
         """
         Input:
 
           ftot -- total flux
-          bf -- bulge fraction (B/T)
+          bf -- bulge fraction (0 <= B/T <= 1)
+          n -- Sersic index
           re -- photobulge semimajor axis effective radius in pixels
           el -- photobulge ellipticity
-          pab -- photobulge position angle in radians
+          pab -- photobulge position angle in degrees
           rd -- photodisk semimajor axis exponential scale length in pixels
-          inc -- photodisk inclination in radians
-          pad -- photodisk position angle in radians
-          n -- Sersic index
+          inc -- photodisk inclination in degrees
+          pad -- photodisk position angle in degrees
           hwsigma -- half-width size in gsig of stamp enclosing the model
         """
         super(GIM2D, self).__init__(**kwargs)
         self.ftot = ftot
         self.bf = bf
+        self.n = n
         self.re = re
         self.el = el
         self.pab = pab * pi / 180.
         self.rd = rd
         self.inc = inc * pi / 180.
         self.pad = pad * pi / 180.
-        self.n = n
         self.hwsigma = hwsigma
         self.xhw = np.ceil(hwsigma * max(self.re, self.rd))
         self.yhw = np.ceil(hwsigma * max(self.re, self.rd))
