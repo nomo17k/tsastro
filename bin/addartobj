@@ -26,6 +26,7 @@ def parsemodel(tokens):
     convert them to model instances.
     """
     # model id as in input and class object and number of parameters
+    # (can use a list for flexible number of params; see GIM2D)
     modeltable = {'gauss': (Gaussian, (2,)),
                   'gim2d': (GIM2D, (9, 10))}
     models = []
@@ -33,20 +34,25 @@ def parsemodel(tokens):
     while 1:
         if idx >= len(tokens):
             break
+        #print(tokens[idx:idx + 3])
         x, y, t = tokens[idx:idx + 3]
         if t not in modeltable:
             raise InvalidModelError('invalid input model format')
         m, npars = modeltable[t]
-        npar = npars[0]
-        for np in npars[1:]:
+
+        # figure out the number of parameters to use
+        npar = 0 #npars[0]
+        for np in npars[0:]:
             idxnextmodel = idx + 3 + np + 2
-            if len(tokens) > idxnextmodel:
-                print(tokens[idxnextmodel])
-                if tokens[idxnextmodel] in modeltable:
-                    npar = np
-                    break
-        #if npar == 0:
-        #    raise InvalidModelError('invalid input model format')
+            if (len(tokens) > idxnextmodel
+                and tokens[idxnextmodel] in modeltable):
+                npar = np
+                break
+            elif len(tokens) + 2 == idxnextmodel:
+                npar = np
+                break
+        if npar == 0:
+            raise InvalidModelError('invalid input model format')
 
         pars = [float(p) for p in tokens[idx + 3: idx + 3 + npar]]
         models.append((float(x), float(y), m(*pars)))
