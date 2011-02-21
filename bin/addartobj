@@ -25,9 +25,9 @@ def parsemodel(tokens):
     Given tokens of strings (either from input arguments or a file),
     convert them to model instances.
     """
-    # model id in input, class, number of input args (x, y, plus params)
-    modeltable = {'gauss': (Gaussian, 2),
-                  'gim2d': (GIM2D, 9)}
+    # model id as in input and class object and number of parameters
+    modeltable = {'gauss': (Gaussian, (2,)),
+                  'gim2d': (GIM2D, (9, 10)}
     models = []
     idx = 0
     while 1:
@@ -36,7 +36,15 @@ def parsemodel(tokens):
         x, y, t = tokens[idx:idx + 3]
         if t not in modeltable:
             raise InvalidModelError('invalid input model format')
-        m, npar = modeltable[t]
+        m, npars = modeltable[t]
+        npar = 0
+        for np in npars:
+            if tokens[idx + 3 + np + 2] in modeltable:
+                npar = np
+                break
+        if np == 0:
+            raise InvalidModelError('invalid input model format')
+
         pars = [float(p) for p in tokens[idx + 3: idx + 3 + npar]]
         models.append((float(x), float(y), m(*pars)))
         idx += npar + 3
