@@ -44,7 +44,7 @@ def parsemodel(tokens):
                 if tokens[idxnextmodel] in modeltable:
                     npar = np
                     break
-        if np == 0:
+        if npar == 0:
             raise InvalidModelError('invalid input model format')
 
         pars = [float(p) for p in tokens[idx + 3: idx + 3 + npar]]
