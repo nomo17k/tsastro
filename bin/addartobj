@@ -39,9 +39,11 @@ def parsemodel(tokens):
         m, npars = modeltable[t]
         npar = 0
         for np in npars:
-            if tokens[idx + 3 + np + 2] in modeltable:
-                npar = np
-                break
+            idxnextmodel = idx + 3 + np + 2
+            if len(tokens) > idxnextmodel:
+                if tokens[idxnextmodel] in modeltable:
+                    npar = np
+                    break
         if np == 0:
             raise InvalidModelError('invalid input model format')
 
