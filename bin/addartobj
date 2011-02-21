@@ -37,16 +37,16 @@ def parsemodel(tokens):
         if t not in modeltable:
             raise InvalidModelError('invalid input model format')
         m, npars = modeltable[t]
-        npar = 0
-        for np in npars:
+        npar = npars[0]
+        for np in npars[1:]:
             idxnextmodel = idx + 3 + np + 2
             if len(tokens) > idxnextmodel:
                 print(tokens[idxnextmodel])
                 if tokens[idxnextmodel] in modeltable:
                     npar = np
                     break
-        if npar == 0:
-            raise InvalidModelError('invalid input model format')
+        #if npar == 0:
+        #    raise InvalidModelError('invalid input model format')
 
         pars = [float(p) for p in tokens[idx + 3: idx + 3 + npar]]
         models.append((float(x), float(y), m(*pars)))
