@@ -41,6 +41,7 @@ def parsemodel(tokens):
         for np in npars:
             idxnextmodel = idx + 3 + np + 2
             if len(tokens) > idxnextmodel:
+                print(tokens[idxnextmodel])
                 if tokens[idxnextmodel] in modeltable:
                     npar = np
                     break
