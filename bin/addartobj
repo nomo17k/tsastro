@@ -27,7 +27,7 @@ def parsemodel(tokens):
     """
     # model id as in input and class object and number of parameters
     modeltable = {'gauss': (Gaussian, (2,)),
-                  'gim2d': (GIM2D, (9, 10)}
+                  'gim2d': (GIM2D, (9, 10))}
     models = []
     idx = 0
     while 1:
