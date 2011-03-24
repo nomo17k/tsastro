@@ -76,6 +76,9 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, modelfile=None,
             ys.append(y)
             ms.append(model.name)
             ps.append(model.parameters)
+        # model.generate allocates arrays for individual objects, so
+        # without freeing too much unnecessary memory may be used
+        model.release()
 
     if save or modelfile is not None:
         cs = []

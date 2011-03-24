@@ -91,6 +91,12 @@ class Morph2D(object):
         """
         return data
 
+    def release(self):
+        """
+        Release memory used for generating this object.
+        """
+        self.xs, self.ys = None, None
+
 
 class Gaussian(Morph2D):
     """
