@@ -125,6 +125,8 @@ if __name__ == '__main__':
                  help='save models into to a FITS extention')
     p.add_option('--modelfile', default=None,
                  help='save models as a FITS file')
+    p.add_option('--tmpdir', default=None,
+                 help='directory path for storing temporary files')
 
     opts, args = p.parse_args()
 
@@ -137,7 +139,7 @@ if __name__ == '__main__':
         # generate a new fits image
         xsize, ysize = opts.new
         data = np.zeros((ysize, xsize), dtype='f')
-        tmpfile = NamedTemporaryFile()
+        tmpfile = NamedTemporaryFile(dir=opts.tmpdir)
         pf.PrimaryHDU(data).writeto(tmpfile.name)
         inim = tmpfile.name
 
