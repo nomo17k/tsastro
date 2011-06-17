@@ -23,8 +23,10 @@ def xyonds9(xcol, ycol, filename, system='image',
             subsetbits=None, noadd=False, clear=False, save=None, dump=False):
     if fits is not None:
         try:
-            with pf.open(filename) as f:
-                data = f[int(fits)].data
+            # tried 'with' and getdata method, but data access gives
+            # io error complaining about the file already closed... so
+            # using plain vanilla method here:
+            data = pf.open(filename)[int(fits)].data
         except:
             raise RuntimeError('file does not seem to be in FITS format')
     elif npy:
