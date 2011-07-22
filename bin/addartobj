@@ -14,7 +14,7 @@ import pyfits as pf
 from tsastro.morph2d import Gaussian, GIM2D
 
 
-__version__ = '20110121'
+__version__ = '20110720'
 
 
 class InvalidModelError(Exception): pass
@@ -28,7 +28,7 @@ def parsemodel(tokens):
     # model id as in input and class object and number of parameters
     # (can use a list for flexible number of params; see GIM2D)
     modeltable = {'gauss': (Gaussian, (2,)),
-                  'gim2d': (GIM2D, (9, 10))}
+                  'gim2d': (GIM2D, (9, 10, 11))}
     models = []
     idx = 0
     while 1:
@@ -41,7 +41,7 @@ def parsemodel(tokens):
         m, npars = modeltable[t]
 
         # figure out the number of parameters to use
-        npar = 0 #npars[0]
+        npar = 0 
         for np in npars[0:]:
             idxnextmodel = idx + 3 + np + 2
             if (len(tokens) > idxnextmodel
