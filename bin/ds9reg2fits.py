@@ -1,0 +1,625 @@
+#!/usr/bin/env python2.6
+"""
+Make a FITS image mask file from a DS9 region file.
+
+For example, to generate a 1024 x 1024 FITS image file named mask.fits
+from a DS9 region file named mask.reg:
+
+  $ ./ds9reg2files.py 1024 1024 mask.reg mask.fits
+
+A DS9 region file must be saved in image coordinates.
+
+To assign an arbitrary mask value to a region, save an integer as a
+text for that region on DS9.
+"""
+#from __future__ import absolute_import
+from __future__ import division
+#from __future__ import print_function
+#from __future__ import unicode_literals
+import logging
+from logging import debug, info, warning, error
+from optparse import OptionParser
+import numpy as np
+from numpy import cos, sin, pi
+import pyfits
+from scipy.weave import inline
+
+
+__version__ = '0.3'
+__date__ = '20110802'
+__author__ = 'Taro Sato'
+__author_email__ = 'ubutsu@gmail.com'
+
+
+# Conversion from FITS BITPIX to NumPy dtype.
+bitpix2dtype = {8: np.uint8,
+                16: np.int16,
+                32: np.int32,
+                -32: np.float32,
+                -64: np.float64}
+
+# Set to False in an environment in which weave is unavailable
+USE_WEAVE = True
+
+
+def rotate(x, y, xo, yo, t):
+    """
+    Rotate a coordinate (x, y) about (xo, yo) by angle t in radian.
+    """
+    xr = (x - xo) * cos(t) - (y - yo) * sin(t) + xo
+    yr = (y - yo) * cos(t) + (x - xo) * sin(t) + yo
+    return xr, yr
+
+
+def inside_polygon(x, y, points):
+    """
+    Return True if a coordinate (x, y) is inside a polygon defined by
+    the list of points.
+
+    Reference:
+
+    http://www.ariel.com.au/a/python-point-int-poly.html
+    """
+    n = len(points)
+    inside = False
+    p1x, p1y = points[0]
+    for i in range(1, n + 1):
+        p2x, p2y = points[i % n]
+        if y > min(p1y, p2y):
+            if y <= max(p1y, p2y):
+                if x <= max(p1x, p2x):
+                    if p1y != p2y:
+                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+        p1x, p1y = p2x, p2y
+    return inside
+
+
+def mask_with_circle(data, xmin, xmax, ymin, ymax, xc, yc, r, maskval):
+    """
+    scipy.weave optimized version of circle masking.
+    """
+    xmin = int(xmin)
+    xmax = int(xmax)
+    ymin = int(ymin)
+    ymax = int(ymax)
+    maskval = int(maskval)
+    xc = float(xc)
+    yc = float(yc)
+    r = float(r)
+    verbose = 1
+
+    code = \
+r"""
+int nrow = Ndata[0];
+int ncol = Ndata[1];
+int ntot = (xmax - xmin) * (ymax - ymin);
+
+for (int xx = xmin; xx < xmax + 1; ++xx) {
+  double x = (double)xx;
+  if (verbose > 0) {
+    printf("%.2f done\n", (100 * (x - xmin) * (ymax - ymin)) / (double)ntot);
+  }
+  for (int yy = ymin; yy < ymax + 1; ++yy) {
+    double y = (double)yy;
+
+    if (r*r >= (x - xc)*(x - xc) + (y - yc)*(y - yc)) {
+      /* the point is inside the ellipse */
+      data[xx + yy * ncol] = maskval;
+    }
+  }
+}
+"""
+    inline(code, ['data', 'xmin', 'xmax', 'ymin', 'ymax',
+                  'xc', 'yc', 'r',
+                  'maskval', 'verbose'])
+    return data
+
+
+def mask_with_ellipse(data, xmin, xmax, ymin, ymax, xc, yc, ax, ay, t, maskval):
+    """
+    scipy.weave optimized version of ellipse masking.
+    """
+    xmin = int(xmin)
+    xmax = int(xmax)
+    ymin = int(ymin)
+    ymax = int(ymax)
+    maskval = int(maskval)
+    xc = float(xc)
+    yc = float(yc)
+    ax = float(ax)
+    ay = float(ay)
+    t = float(-t)
+    verbose = 1
+
+    code = \
+r"""
+int nrow = Ndata[0];
+int ncol = Ndata[1];
+double xr, yr;
+int ntot = (xmax - xmin) * (ymax - ymin);
+
+for (int xx = xmin; xx < xmax + 1; ++xx) {
+  double x = (double)xx;
+  if (verbose > 0) {
+    printf("%.2f done\n", (100 * (x - xmin) * (ymax - ymin)) / (double)ntot);
+  }
+  for (int yy = ymin; yy < ymax + 1; ++yy) {
+    double y = (double)yy;
+
+    /* rotate this point to see if it's inside the box */
+    xr = (x - xc) * cos(t) - (y - yc) * sin(t) + xc;
+    yr = (y - yc) * cos(t) + (x - xc) * sin(t) + yc;
+
+    if (1. >= (xr-xc)*(xr-xc)/ax/ax + (yr-yc)*(yr-yc)/ay/ay) {
+      /* the point is inside the ellipse */
+      data[xx + yy * ncol] = maskval;
+    }
+  }
+}
+"""
+    inline(code, ['data', 'xmin', 'xmax', 'ymin', 'ymax',
+                  'xc', 'yc', 'ax', 'ay', 't',
+                  'maskval', 'verbose'])
+    return data
+
+
+def mask_with_box(data, xmin, xmax, ymin, ymax, xc, yc, dx, dy, t, maskval):
+    """
+    scipy.weave optimized version of box masking.
+    """
+    xmin = int(xmin)
+    xmax = int(xmax)
+    ymin = int(ymin)
+    ymax = int(ymax)
+    maskval = int(maskval)
+    xc = float(xc)
+    yc = float(yc)
+    dx = float(dx)
+    dy = float(dy)
+    t = float(-t)
+    verbose = 1
+
+    code = \
+r"""
+int nrow = Ndata[0];
+int ncol = Ndata[1];
+
+double x0 = xc - dx;
+double x1 = xc + dx;
+double y0 = yc - dy;
+double y1 = yc + dy;
+double xr, yr;
+
+int ntot = (xmax - xmin) * (ymax - ymin);
+
+for (int xx = xmin; xx < xmax + 1; ++xx) {
+  double x = (double)xx;
+
+  if (verbose > 0) {
+    printf("%.2f done\n", (100 * (x - xmin) * (ymax - ymin)) / (double)ntot);
+  }
+
+  for (int yy = ymin; yy < ymax + 1; ++yy) {
+    double y = (double)yy;
+
+    /***************************************************/
+    /* rotate this point to see if it's inside the box */
+    xr = (x - xc) * cos(t) - (y - yc) * sin(t) + xc;
+    yr = (y - yc) * cos(t) + (x - xc) * sin(t) + yc;
+
+    if (x0 <= xr && xr <= x1 && y0 <= yr && yr <= y1) {
+      /* the point is inside the box */
+      data[xx + yy * ncol] = maskval;
+    }
+    /***************************************/
+
+  }
+}
+"""
+    inline(code, ['data', 'xmin', 'xmax', 'ymin', 'ymax',
+                  'xc', 'yc', 'dx', 'dy', 't',
+                  'maskval', 'verbose'])
+    return data
+
+
+def mask_with_polygon(data, xmin, xmax, ymin, ymax, points, maskval):
+    """
+    scipy.weave optimized version of polygon masking.
+    """
+    xmin = int(xmin)
+    xmax = int(xmax)
+    ymin = int(ymin)
+    ymax = int(ymax)
+    maskval = int(maskval)
+    pxs = [float(x) for (x, y) in points]
+    pys = [float(y) for (x, y) in points]
+    verbose = 1
+
+    code = \
+r"""
+int nrow = Ndata[0];
+int ncol = Ndata[1];
+
+int counter;
+double xinters;
+double p1x, p1y, p2x, p2y;
+double vmin, vmax;
+
+int n = pxs.length();
+double *ppxs = (double*)malloc(sizeof(double) * (n+1));
+double *ppys = (double*)malloc(sizeof(double) * (n+1));
+
+for (int i = 0; i < n; ++i) {
+  ppxs[i] = (double)py_to_float(PyList_GetItem(pxs, i), "pxs");
+  ppys[i] = (double)py_to_float(PyList_GetItem(pys, i), "pys");
+}
+
+int ntot = (xmax - xmin) * (ymax - ymin);
+
+for (int xx = xmin; xx < xmax + 1; ++xx) {
+  double x = (double)xx;
+
+  if (verbose > 0) {
+    printf("%.2f done\n", (100*(x-xmin)*(ymax-ymin))/(double)ntot);
+  }
+
+  for (int yy = ymin; yy < ymax + 1; ++yy) {
+    double y = (double)yy;
+
+    /***************************************/
+    /* test if the point is inside polygon */
+    counter = 0;
+
+    p1x = ppxs[0];
+    p1y = ppys[0];
+    for (int i = 1; i <= n; ++i) {
+      p2x = (double)ppxs[i % n];
+      p2y = (double)ppys[i % n];
+
+      vmin = p1y < p2y ? p1y : p2y;
+      if (y > vmin) {
+        vmax = p1y > p2y ? p1y : p2y;
+        if (y <= vmax) {
+          vmax = p1x > p2x ? p1x : p2x;
+          if (x <= vmax) {
+            if (p1y != p2y) {
+              xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x;
+              if (p1x == p2x || x <= xinters)
+                counter++;
+            }
+          }
+        }
+      }
+      p1x = p2x;
+      p1y = p2y;
+    }
+
+    if (counter % 2 != 0) {
+      /* the point is inside the polygon */
+      data[xx + yy * ncol] = maskval;
+    }
+    /***************************************/
+
+  }
+}
+
+free(ppxs);
+free(ppys);
+"""
+    inline(code, ['data', 'xmin', 'xmax', 'ymin', 'ymax', 'pxs', 'pys',
+                  'maskval', 'verbose'])
+    return data
+
+
+class Shape(object):
+
+    def __init__(self, v=1):
+        self.v = int(v)
+
+    def __repr__(self):
+        return ''
+
+    def set_mask(self, data):
+        e = ("Override this method to set mask values to masked region.")
+        raise NotImplementedError(e)
+
+
+class Circle(Shape):
+
+    def __init__(self, x, y, r, v=1):
+        super(Circle, self).__init__(v)
+        self.x = float(x) - 1.
+        self.y = float(y) - 1.
+        self.r = float(r)
+
+    def __repr__(self):
+        return ('Circle(x = %.1f, y = %.1f, r = %.1f, v = %d)'
+                % (self.x+1, self.y+1, self.r, self.v))
+
+    def find_bounds(self, data):
+        xmin, xmax = int(round(self.x - self.r)), int(round(self.x + self.r))
+        ymin, ymax = int(round(self.y - self.r)), int(round(self.y + self.r))
+        ysize, xsize = data.shape
+        xmin = 0 if xmin < 0 else xmin
+        xmax = xsize - 1 if xmax >= xsize else xmax
+        ymin = 0 if ymin < 0 else ymin
+        ymax = ysize - 1 if ymax >= ysize else ymax
+        return xmin, xmax, ymin, ymax
+
+    def set_mask(self, data):
+        xmin, xmax, ymin, ymax = self.find_bounds(data)
+        xc, yc, r = self.x, self.y, self.r
+        rr = r * r
+        if USE_WEAVE:
+            data = mask_with_circle(data, xmin, xmax, ymin, ymax,
+                                    xc, yc, r, self.v)
+        else:
+            ntot = float((xmax - xmin) * (ymax - ymin))
+            for x in range(xmin, xmax + 1):
+                debug("%.2f%% done..." % (100. * (x - xmin) * (ymax - ymin) / ntot))
+                for y in range(ymin, ymax + 1):
+                    if rr >= (x - xc)**2 + (y - yc)**2:
+                        data[y:y+1, x:x+1] = self.v
+        return data
+
+
+class Ellipse(Shape):
+
+    def __init__(self, x, y, ax, ay, angle, v=1):
+        super(Ellipse, self).__init__(v)
+        self.x = float(x) - 1.
+        self.y = float(y) - 1.
+        self.ax = float(ax)
+        self.ay = float(ay)
+        self.angle = pi * float(angle) / 180.
+
+    def __repr__(self):
+        return ('Ellipse(x = %.1f, y = %.1f, ax = %.1f, ay = %.1f, angle = %.1f, v=%d)'
+                % (self.x+1, self.y+1, self.ax, self.ay,
+                   180.*self.angle/pi, self.v))
+
+    def find_bounds(self, data):
+        # find coordinate bounds from rotated ellipse.
+        t = self.angle
+        xc, yc = self.x, self.y
+        dx, dy = self.ax, self.ay
+        x1, y1 = rotate(xc - dx, yc - dy, xc, yc, t)
+        x2, y2 = rotate(xc - dx, yc + dy, xc, yc, t)
+        x3, y3 = rotate(xc + dx, yc - dy, xc, yc, t)
+        x4, y4 = rotate(xc + dx, yc + dy, xc, yc, t)
+        xmin, xmax = int(round(min(x1, x2, x3, x4))), int(round(max(x1, x2, x3, x4)))
+        ymin, ymax = int(round(min(y1, y2, y3, y4))), int(round(max(y1, y2, y3, y4)))
+        ysize, xsize = data.shape
+        xmin = 0 if xmin < 0 else xmin
+        xmax = xsize - 1 if xmax >= xsize else xmax
+        ymin = 0 if ymin < 0 else ymin
+        ymax = ysize - 1 if ymax >= ysize else ymax
+        return xmin, xmax, ymin, ymax
+
+    def set_mask(self, data):
+        xmin, xmax, ymin, ymax = self.find_bounds(data)
+        xc, yc, ax, ay, t = self.x, self.y, self.ax, self.ay, self.angle
+        if USE_WEAVE:
+            data = mask_with_ellipse(data, xmin, xmax, ymin, ymax,
+                                     self.x, self.y, ax, ay, self.angle,
+                                     self.v)
+        else:
+            ntot = float((xmax - xmin) * (ymax - ymin))
+            for x in range(xmin, xmax + 1):
+                debug("%.2f%% done..." % (100. * (x - xmin) * (ymax - ymin) / ntot))
+                for y in range(ymin, ymax + 1):
+                    xr, yr = rotate(x, y, xc, yc, -t)
+                    c = ((xr - xc) / ax)**2 + ((yr - yc) / ay)**2
+                    if c <= 1:
+                        data[y:y+1, x:x+1] = self.v
+        return data
+
+
+class Box(Shape):
+
+    def __init__(self, x, y, dx, dy, angle, v=1):
+        super(Box, self).__init__(v)
+        self.x = float(x) - 1.
+        self.y = float(y) - 1.
+        self.dx = float(dx) / 2.
+        self.dy = float(dy) / 2.
+        self.angle = pi * float(angle) / 180.
+
+    def __repr__(self):
+        return ('Box(x = %.1f, y = %.1f, dx = %.1f, dy = %.1f, angle = %.1f, v = %d)'
+                % (self.x + 1, self.y + 1, 2. * self.dx, 2. * self.dy,
+                   180. * self.angle / pi, self.v))
+
+    def find_bounds(self, data):
+        # find coordinate bounds from rotated box.
+        t = self.angle
+        xc, yc = self.x, self.y
+        dx, dy = self.dx, self.dy
+        x1, y1 = rotate(xc - dx, yc - dy, xc, yc, t)
+        x2, y2 = rotate(xc - dx, yc + dy, xc, yc, t)
+        x3, y3 = rotate(xc + dx, yc - dy, xc, yc, t)
+        x4, y4 = rotate(xc + dx, yc + dy, xc, yc, t)
+        xmin, xmax = (int(round(min(x1, x2, x3, x4))),
+                      int(round(max(x1, x2, x3, x4))))
+        ymin, ymax = (int(round(min(y1, y2, y3, y4))),
+                      int(round(max(y1, y2, y3, y4))))
+        ysize, xsize = data.shape
+        xmin = 0 if xmin < 0 else xmin
+        xmax = xsize - 1 if xmax >= xsize else xmax
+        ymin = 0 if ymin < 0 else ymin
+        ymax = ysize - 1 if ymax >= ysize else ymax
+        return xmin, xmax, ymin, ymax
+
+    def set_mask(self, data):
+        xmin, xmax, ymin, ymax = self.find_bounds(data)
+        if USE_WEAVE:
+            data = mask_with_box(data, xmin, xmax, ymin, ymax,
+                                 self.x, self.y, self.dx, self.dy, self.angle,
+                                 self.v)
+        else:
+            xc, yc = self.x, self.y
+            t = self.angle
+
+            # Each point is rotated and then tested to see if it is
+            # inside the non-rotated box.  This is simpler.
+            x0, x1 = self.x - self.dx, self.x + self.dx
+            y0, y1 = self.y - self.dy, self.y + self.dy
+
+            ntot = float((xmax - xmin) * (ymax - ymin))
+            for x in range(xmin, xmax + 1):
+                debug("%.2f%% done..." % (100. * (x - xmin) * (ymax - ymin) / ntot))
+                for y in range(ymin, ymax + 1):
+                    xr, yr = rotate(x, y, xc, yc, -t)
+                    if x0 <= xr <= x1 and y0 <= yr <= y1:
+                        data[y:y+1, x:x+1] = self.v
+        return data
+
+
+class Polygon(Shape):
+
+    def __init__(self, points, v=1):
+        super(Polygon, self).__init__(v)
+        self.points = [(float(x) - 1., float(y) - 1.) for (x, y) in points]
+
+    def __repr__(self):
+        pts = [('(%.1f, %.1f)' % (x + 1, y + 1)) for x, y in self.points]
+        return ('Polygon(' + ', '.join(pts) + (', v = %d)' % self.v))
+
+    def find_bounds(self, data):
+        xs = [x for x, y in self.points]
+        ys = [y for x, y in self.points]
+        xmin, xmax = int(round(min(xs))), int(round(max(xs)))
+        ymin, ymax = int(round(min(ys))), int(round(max(ys)))
+        ysize, xsize = data.shape
+        xmin = 0 if xmin < 0 else xmin
+        xmax = xsize - 1 if xmax >= xsize else xmax
+        ymin = 0 if ymin < 0 else ymin
+        ymax = ysize - 1 if ymax >= ysize else ymax
+        return xmin, xmax, ymin, ymax
+
+    def set_mask(self, data):
+        xmin, xmax, ymin, ymax = self.find_bounds(data)
+        if USE_WEAVE:
+            data = mask_with_polygon(data, xmin, xmax, ymin, ymax,
+                                     self.points, self.v)
+        else:
+            ntot = float((xmax - xmin) * (ymax - ymin))
+            for x in range(xmin, xmax + 1):
+                debug("%.2f%% done..." % (100. * (x - xmin) * (ymax - ymin) / ntot))
+                for y in range(ymin, ymax + 1):
+                    if inside_polygon(x, y, self.points):
+                        data[y:y+1, x:x+1] = self.v
+        return data
+
+
+def shape_factory(line):
+    # If an integer given explicitly, use it as mask value.
+    v = (int(line[line.index('text={')+6:line.index('}')])
+         if line.find('text={') >= 0 else None)
+
+    if line.startswith('circle('):
+        args = line[line.index('(')+1:line.index(')')]
+        args = args.split(',')
+        o = Circle(*args) if v is None else Circle(*args, v=v)
+        info(o)
+    elif line.startswith('ellipse('):
+        args = line[line.index('(')+1:line.index(')')]
+        args = args.split(',')
+        o = Ellipse(*args) if v is None else Ellipse(*args, v=v)
+        info(o)
+    elif line.startswith('box('):
+        args = line[line.index('(')+1:line.index(')')]
+        args = args.split(',')
+        o = Box(*args) if v is None else Box(*args, v=v)
+        info(o)
+    elif line.startswith('polygon('):
+        args = line[line.index('(')+1:line.index(')')]
+        args = args.split(',')
+        points = []
+        for i in range(0, len(args), 2):
+            points.append((float(args[i]), float(args[i+1])))
+        o = Polygon(points) if v is None else Polygon(points, v=v)
+        info(o)
+    else:
+        o = None
+        warning('Ignored: %s' % line.strip())
+    return o
+
+
+def ds9reg2fits(dx, dy, freg, fout, fillval=0, bitpix=8, overwrite=False):
+    """
+    Generate a FITS mask image from a DS9 region file.
+
+    Input:
+
+    dx, dy -- pixel sizes of output mask in x and y directions
+    freg -- DS9 region file with mask definition
+    fout -- output file name
+    fillval -- fill value for output file
+    bitpix -- BITPIX value for output FITS file
+    overwrite -- True if overwriting an existing output file
+    """
+    debug('Read shapes from a DS9 region file (%s)...' % freg)
+    shapes = []
+    f = open(freg)
+    for ln in f:
+        o = shape_factory(ln)
+        if o is not None:
+            shapes.append(o)
+    f.close()
+
+    debug('Creating %d by %d array with value %d...' % (dx, dy, fillval))
+    mask = fillval * np.ones((dy, dx), dtype=bitpix2dtype[bitpix])
+
+    debug('Iterating over all shapes and do masking...')
+    for shape in shapes:
+        mask = shape.set_mask(mask)
+
+    debug('Saving mask to output file...')
+    hdu = pyfits.PrimaryHDU(mask)
+    hdus = pyfits.HDUList([hdu])
+    hdus.writeto(fout, clobber=overwrite)
+
+    debug('Done.')
+
+
+if __name__ == '__main__':
+    usage = '%prog [OPTIONS] DX DY REGIONFILE OUTPUT'
+    p = OptionParser(usage=usage,
+                     description=__doc__,
+                     version='%prog '+ __version__)
+    p.add_option('-f', '--fill', dest='fillval',
+                 action='store', type='int', default=0,
+                 help='a fill value for the output mask')
+    p.add_option('-o', '--overwrite', dest='overwrite',
+                 action='store_true',
+                 help='overwrite existing output file')
+    p.add_option('-b', '--bitpix', dest='bitpix',
+                 action='store', type='int', default=8,
+                 help='BITPIX value for output FITS file')
+    p.add_option('-v', '--verbose', dest='verb',
+                 action='store', type='int', default=0,
+                 help='integer verbosity level')
+    opts, args = p.parse_args()
+
+    if len(args) != 4:
+        p.error('Must specify: DX DY REGIONFILE OUTPUT')
+    dx = int(args[0])
+    dy = int(args[1])
+    freg = args[2]
+    fout = args[3]
+
+    if not (0 <= opts.verb <= 3):
+        p.error('verbose must be in the range 0 - 3')
+    loglevel = {0: logging.ERROR,
+                1: logging.WARNING,
+                2: logging.INFO,
+                3: logging.DEBUG}[opts.verb]
+    logging.basicConfig(level=loglevel, format='')
+
+    if opts.bitpix not in bitpix2dtype:
+        p.error('bitpix must be one of ' + ', '.join(bitpix2dtype))
+
+    ds9reg2fits(dx, dy, freg, fout, opts.fillval, opts.bitpix, opts.overwrite)
