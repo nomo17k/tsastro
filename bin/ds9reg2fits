@@ -5,7 +5,7 @@ Make a FITS image mask file from a DS9 region file.
 For example, to generate a 1024 x 1024 FITS image file named mask.fits
 from a DS9 region file named mask.reg:
 
-  $ ./ds9reg2files.py 1024 1024 mask.reg mask.fits
+  $ ./ds9reg2files 1024 1024 mask.reg mask.fits
 
 A DS9 region file must be saved in image coordinates.
 
