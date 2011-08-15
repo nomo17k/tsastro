@@ -1,0 +1,90 @@
+#!/usr/bin/env python2.6
+"""
+Stack masks into a master image.  Each mask is multiplied by a given
+number before summed.
+"""
+import logging
+from optparse import OptionParser
+import warnings
+import numpy as np
+import pyfits as pf
+
+
+__version__ = '0.1'
+__date__ = '20110815'
+__author__ = 'Taro Sato'
+__author_email__ = 'ubutsu@gmail.com'
+
+
+# Suppress warnings issued by PyFITS module.
+warnings.filterwarnings('ignore')
+
+
+# logging configuration.
+logger = logging.getLogger('stackmasks')
+logger.setLevel(logging.INFO)
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+formatter = logging.Formatter("%(message)s")
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+info = logger.info
+
+
+# Conversion from FITS BITPIX to NumPy dtype.
+bitpix2dtype = {8: np.uint8,
+                16: np.int16,
+                32: np.int32,
+                -32: np.float32,
+                -64: np.float64}
+
+
+def read_mask(filename):
+    hdus = pf.open(filename)
+    m = hdus[0].data
+    hdus.close()
+    return m
+
+
+def save_mask(filename, mask, overwrite):
+    hdu = pf.PrimaryHDU(mask)
+    hdus = pf.HDUList([hdu])
+    hdus.writeto(filename, clobber=overwrite)
+
+
+def main(pairs, output, overwrite, bitpix):
+    filename, factor = pairs[0]
+    info('Mask %s is multiplied by %d.' % (filename, factor))
+    master = np.array(read_mask(filename) * factor, dtype=bitpix2dtype[bitpix])
+    for filename, factor in pairs[1:]:
+        info('Mask %s is multiplied by %d and added.' % (filename, factor))
+        mask = read_mask(filename)
+        master += (mask * factor)
+    save_mask(output, master, overwrite)
+    info('Output file %s created.' % output)
+    return
+
+
+if __name__ == '__main__':
+    usage = ('%prog [OPTIONS] FITSMASK1 MULTIPLIER1 FITSMASK2 MULTIPLIER2'
+             ' ... OUTPUT')
+    p = OptionParser(usage=usage,
+                     description=__doc__.strip(),
+                     version='%prog '+ __version__)
+    p.add_option('-o', '--overwrite', action='store_true',
+                 help='overwrite existing output file')
+    p.add_option('-b', '--bitpix', action='store', type='int', default=16,
+                 help='BITPIX value for output FITS file (default: 16)')
+    p.add_option('-v', '--verbose', action='store_true', default=False,
+                 help='set for verbose output')
+    opts, args = p.parse_args()
+
+    if not (len(args) >= 3):
+        p.error('Must specify at least one mask, one multiplier, and output.')
+
+    logger.setLevel({True: logging.INFO,
+                     False: logging.ERROR}[opts.verbose])
+
+    pairs = [(args[i], float(args[i+1])) for i in range(0, len(args) - 1, 2)]
+    output = args[-1]
+    main(pairs, output, opts.overwrite, opts.bitpix)
