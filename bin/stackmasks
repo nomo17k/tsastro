@@ -1,7 +1,7 @@
 #!/usr/bin/env python2.6
 """
 Stack masks into a master image.  Each mask is multiplied by a given
-number before summed.
+number before logical ORed.
 """
 import logging
 from optparse import OptionParser
@@ -10,7 +10,7 @@ import numpy as np
 import pyfits as pf
 
 
-__version__ = '0.1'
+__version__ = '0.2'
 __date__ = '20110815'
 __author__ = 'Taro Sato'
 __author_email__ = 'ubutsu@gmail.com'
@@ -59,7 +59,7 @@ def main(pairs, output, overwrite, bitpix):
     for filename, factor in pairs[1:]:
         info('Mask %s is multiplied by %d and added.' % (filename, factor))
         mask = read_mask(filename)
-        master += (mask * factor)
+        master |= (mask * factor)
     save_mask(output, master, overwrite)
     info('Output file %s created.' % output)
     return
