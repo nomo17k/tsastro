@@ -44,10 +44,12 @@ def get_scripts():
     """
     paths = ['bin/addartobj',
              'bin/convgauss',
+             'bin/ds9reg2fits',
              'bin/fitshead',
              'bin/radprof',
              'bin/sexcat2fits',
              'bin/simbgim',
+             'bin/stackmasks',
              'bin/xyonds9']
     #paths.extend(glob.glob('bin/*.py')]
     return paths
