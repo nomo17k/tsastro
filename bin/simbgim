@@ -101,7 +101,7 @@ def smooth_image(im, kern):
 
 def fillbg(image, objmask, weight, bkgnd, badmask,
            hwstamp=None, hwgrow=1, gsig=None, boxfw=None, zoomscale=None,
-           minpixel=10000, maxiter=200, rejseq='default', logfile=None):
+           minpixel=10000, maxiter=-1, rejseq='default', logfile=None):
     """
     Fill masked pixels with background with noise.
 
@@ -196,30 +196,47 @@ def fillbg(image, objmask, weight, bkgnd, badmask,
             # are no good simga), fake will all be nan as well.
 
             # sample local noise for scaling the noise empirically
+            pxx1, pxx2, pyy1, pyy2 = -1, -1, -1, -1
             grow = 0
-            for i in range(maxiter):
+            i = 0
+            while True:
+                # this looping grows the stamp until the minimum
+                # number of pixels for variance estimate is exceeded
+                if maxiter > 0 and i >= maxiter:
+                    break
+
                 xx1, xx2 = max(0, x1 - grow), min(xsize, x2 + grow)
                 yy1, yy2 = max(0, y1 - grow), min(ysize, y2 + grow)
+
+                if (xx1 == pxx1 and xx2 == pxx2
+                    and yy1 == pyy1 and yy2 == pyy2):
+                    # the stamp hasn't grown so stop
+                    break
 
                 m = (np.equal(objmask[yy1:yy2, xx1:xx2], 0)
                      * np.equal(badmask[yy1:yy2, xx1:xx2], 0))
                 if m.sum() >= minpixel:
-                    # copying looks like a waste of memory, but the
-                    # master images may be memory mapped, and if they
-                    # are not copied like this, indexing might fail
-                    # later within this function
-                    im = np.copy(image[yy1:yy2, xx1:xx2])
-                    bg = np.copy(bkgnd[yy1:yy2, xx1:xx2])
-                    if grow > 0:
-                        log.w('  grew stamp by %d' % grow)
                     break
 
-                grow += hwgrow
+                # save previous boundary
+                pxx1, pxx2, pyy1, pyy2 = xx1, xx2, yy1, yy2
 
-            if i + 1 == maxiter:
-                s = "hwgrow limit reached"
-                log.w("  " + s)
-                raise MaxIterationError(s)
+                grow += hwgrow
+                i += 1
+
+            # copying looks like a waste of memory, but the master
+            # images may be memory mapped, and if they are not copied
+            # like this, indexing might fail later within this
+            # function
+            im = np.copy(image[yy1:yy2, xx1:xx2])
+            bg = np.copy(bkgnd[yy1:yy2, xx1:xx2])
+            if grow > 0:
+                log.w('  grew stamp by %d' % grow)
+
+            #if i + 1 == maxiter:
+            #    s = "hwgrow limit reached"
+            #    log.w("  " + s)
+            #    raise MaxIterationError(s)
 
             # if smoothing, do it here
             kern = (gauss_kern(gsig, gsig)
