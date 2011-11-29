@@ -104,7 +104,9 @@ def addartobj(inim, outim, models, save=False, tmpfile=None, modelfile=None,
         mod.release()
 
     # add info to header
-    hdr.update('AOBJINFO', 'addartobj [v%s] by Taro Sato' % __version__)
+    progver = ('addartobj [v%s] by Taro Sato' % __version__)
+    models.header.update('AOBJINFO', progver)
+    hdr.update('AOBJINFO', progver)
     hdr.update('AOBINPUT', inim, comment='input image used')
 
     # hdus for output fits file
