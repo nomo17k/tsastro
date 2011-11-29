@@ -8,7 +8,7 @@ from numpy import arctan, cos, exp, pi, sin, sqrt
 from scipy.special import gamma
 
 
-__version__ = '20110713'
+__version__ = '20111129'
 
 
 class Morph2D(object):
@@ -177,8 +177,8 @@ class GIM2D(Morph2D):
 
     @property
     def parameters(self):
-        return [self.ftot, self.bf, self.re, self.el, self.pab, self.rd,
-                self.inc, self.pad, self.n]
+        return [self.ftot, self.bf, self.n, self.re, self.el, self.pab,
+                self.rd, self.inc, self.pad]
 
     def generate(self, x, y, data):
         hw = np.ceil(self.hwfactor * max(self.re, self.rd * 1.67835))
