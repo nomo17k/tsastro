@@ -19,6 +19,9 @@ class _COMM_WORLD(object):
     def Get_size(self):
         return 1
 
+    def Allgather(self, sendbuf, recvbuf):
+        recvbuf[0][:] = sendbuf[0]
+
     def Gather(self, sendbuf, recvbuf, root=0):
         recvbuf[0][0] = sendbuf[0]
 
