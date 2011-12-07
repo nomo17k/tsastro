@@ -12,6 +12,9 @@ class _COMM_WORLD(object):
 
     def Bcast(self, buf, root=0):
         pass
+    
+    def bcast(self, obj=None, root=0):
+        return obj
 
     def Get_rank(self):
         return 0
