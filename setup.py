@@ -46,7 +46,7 @@ def get_scripts():
              'bin/convgauss',
              'bin/ds9reg2fits',
              'bin/fitshead',
-             'bin/mcmclz',
+             'bin/mcmcangcorr',
              'bin/radprof',
              'bin/sexcat2fits',
              'bin/simbgim',
