@@ -1,0 +1,266 @@
+#!/usr/bin/env python2.6
+"""
+Fit a power-law function to Landy-Szalay estimator via MCMC.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+import matplotlib.pyplot as plt
+import numpy as np
+try:
+    import pymc
+except ImportError as e:
+    print('pymc not installed.')
+    exit()
+
+
+__version__ = "20120206"
+
+
+FIG_TRACE = 101
+FIG_DISTRIBUTION = 201
+FIG_FIT = 301
+
+
+def readtxt(filename, columns=(0, 1, 2, 3)):
+    """Read data from a text file.
+
+    Parameters
+    ----------
+    filename : str
+        Filename with space-delimited data.
+    columns : tuple
+        4-element tuple of zero-indexed columns indicating (ts, ws,
+        dws, rrs), defaults to (0, 1, 2, 3).
+
+    Returns
+    -------
+    Tuple of (ts, ws, dws, rrs)
+    """
+    data = np.loadtxt(filename, usecols=columns,
+                      dtype=[('ts', float),
+                             ('ws', float),
+                             ('dws', float),
+                             ('rrs', float)])
+    return data['ts'], data['ws'], data['dws'], data['rrs']
+
+
+def wfitfunc(ts, aw, gamma, ic):
+    """Evaluate a L-S fit function for at angular separations.
+
+    Parameters
+    ----------
+    ts : array_like
+        Angular separations in degree.
+    aw : float
+        Power law amplitude normalized to 10^-2; see Notes.
+    gamma : float
+        Power law slope; see Notes.
+    ic : float
+        Integral constraint; see Notes.
+
+    Notes
+    -----
+    The fitting function is of the form
+
+    .. math:: \omega = (A_w / 10^2) * (\theta^{1 - \gamma} - IC) 
+
+    which is conventionally used for this purpose.
+    """
+    return (aw * 1e-2) * (ts**(1. - gamma) - ic)
+
+
+def fitlz(ts, ws, dws, rrs, mfit=None, iter=2000, burn=1000, thin=2,
+          gammalim=None, awlim=None):
+    """Do MCMC.
+
+    Parameters
+    ----------
+    ts : array_like
+        Angular separations in degree.
+    ws, dws : array_like
+        Mean of L-S estimator at `ts`.
+    dws : array_like
+        The standard deviation of L-S estimator at `ts`.
+    rrs : array_like
+        Random-random pair counts at `ts`.
+    mfit : array_like of bool, optional
+        Mask array for fit domain over `ts`, defaults to None.
+    gammalim : (float, float), optional
+        Tuple of lower and upper values for fit parameter gamma,
+        defaults to (1.0, 3.0).
+    awlim : (float, float)
+        Tuple of lower and upper values for fit parameter A_w,
+        defaults to (1e-2, 1e2).
+    iter : int, optional
+        Total number of MCMC sampling iterations, defaults to 2000.
+    burn : int, optional
+        Number of burning interations, defaults to 1000.
+    thin : int, optional
+        Tallying intervals over iterations, defaults to 2.
+
+    Returns
+    -------
+    pymc.MCMC instance is returned after a call to its sample method.
+    """
+    ts4rrs = np.asarray(ts, dtype=float)
+    ws = np.asarray(ws, dtype=float)
+    dws = np.asarray(dws, dtype=float)
+    rrs = np.asarray(rrs, dtype=float)
+
+    if mfit is not None:
+        # trim data to valid range
+        ts = ts4rrs[mfit]
+        ws = ws[mfit]
+        dws = dws[mfit]
+    else:
+        ts = ts4rrs[:]
+
+    # cache this for repeated use
+    rrsum = rrs.sum()
+
+    # parameters to be estimated
+    lower, upper = (1.0, 3.0) if gammalim is None else gammalim
+    gamma = pymc.Uniform('gamma', lower=lower, upper=upper)
+
+    lower, upper = (1e-2, 1e2) if awlim is None else awlim
+    aw = pymc.Uniform('aw', lower=lower, upper=upper)
+
+    @pymc.deterministic
+    def ic(gamma=gamma):
+        return (rrs * (ts4rrs**(1. - gamma))).sum() / (1. * rrsum)
+
+    @pymc.deterministic
+    def wfit(aw=aw, gamma=gamma, ic=ic):
+        return wfitfunc(ts, aw, gamma, ic)
+
+    w = pymc.Normal('w', mu=wfit, tau=1./dws**2, value=ws, observed=True)
+
+    model = pymc.MCMC([aw, gamma, ic, wfit])
+    model.sample(iter, burn, thin)
+    return model
+
+
+def main(filename, ltrange=None, columns=(0, 1, 2, 3), gammalim=(1., 3.),
+         awlim=(1e-2, 1e2), iter=110000, burn=10000, thin=2):
+    ts, ws, dws, rr = readtxt(filename, columns)
+
+    # define valid data points
+    mfit = np.logical_not(np.isnan(ws) + np.isnan(dws))
+
+    # restrict the range of theta to fit
+    ltmin, ltmax = -2.5, -0.5 if ltrange is None else ltrange
+    mfit = mfit * (ts >= ltmin) * (ts <= ltmax)
+
+    m = fitlz(10**ts, ws, dws, rr, mfit=mfit, awlim=awlim, gammalim=gammalim,
+              iter=iter, burn=burn, thin=thin, )
+
+    # print out stats
+    pars = ['aw', 'gamma', 'ic']
+    for i, par in enumerate(pars):
+        d = m.stats()[par]
+
+        print(par)
+        for key, val in d.iteritems():
+            print('%s: ' % key, end='')
+            print(val)
+
+        print('')
+    
+    # plot traces
+    pars = ['aw', 'gamma', 'ic']
+    for i, par in enumerate(pars):
+        plt.figure(FIG_TRACE)
+        plt.subplot(len(pars), 1, i + 1)
+        plt.plot(m.trace(par)[:])
+        plt.ylabel(par)
+        if i == 0:
+            plt.title('Trace')
+        if i == len(pars) - 1:
+            plt.xlabel('Iteration')
+
+    # plot parameter distributions
+    for i, (xpar, ypar) in enumerate([('aw', 'gamma'), ('aw', 'ic')]):
+        xs, ys = m.trace(xpar)[:], m.trace(ypar)[:]
+
+        x0, x1 = xs.min(), xs.max()
+        y0, y1 = ys.min(), ys.max()
+        dx, dy = x1 - x0, y1 - y0
+        xmin = x0 - dx / 10.
+        xmax = x1 + dx / 10.
+        ymin = y0 - dy / 10.
+        ymax = y1 + dy / 10.
+
+        plt.figure(FIG_DISTRIBUTION + i)
+        axm = plt.axes([0.1, 0.1, 0.7, 0.7])
+        axx = plt.axes([0.1, 0.8, 0.7, 0.1], sharex=axm)
+        axy = plt.axes([0.8, 0.1, 0.1, 0.7], sharey=axm)
+
+        for label in axx.get_xticklabels() + axy.get_yticklabels():
+            label.set_visible(False)
+
+
+        axm.plot(xs, ys, ',')
+        axm.set_xlabel(xpar)
+        axm.set_ylabel(ypar)
+
+        bins = 1000
+        histtype = 'stepfilled'
+        axx.hist(xs, bins=bins, histtype=histtype, lw=0)
+        axy.hist(ys, bins=bins, histtype=histtype, lw=0,
+                 orientation='horizontal')
+
+        axm.set_xlim((xmin, xmax))
+        axm.set_ylim((ymin, ymax))
+
+        axx.set_xlim(axm.get_xlim())
+        axy.set_ylim(axm.get_ylim())
+
+    # plot fitting functions
+    plt.figure(FIG_FIT)
+
+    # best and HPD
+    plt.plot(ts[mfit], m.stats()['wfit']['quantiles'][50], '-',
+             color='red', label='best')
+    plt.plot(ts[mfit], m.stats()['wfit']['95% HPD interval'][:,0], '--',
+             color='red', label='95%')
+    plt.plot(ts[mfit], m.stats()['wfit']['95% HPD interval'][:,1], '--',
+             color='red')
+
+    # observed data points
+    plt.errorbar(ts, ws, yerr=dws, fmt='o', color='blue', label='data')
+
+    plt.xlabel('log theta[deg]')
+    plt.ylabel('omega_LZ')
+    plt.legend()
+
+    plt.show()
+
+
+if __name__ == '__main__':
+    usage = 'usage: %prog [OPTIONS] FILENAME'
+    p = OptionParser(usage=usage, description=__doc__, version=__version__)
+
+    p.add_option('--columns', type='int', nargs=4, default=(0, 1, 2, 3),
+                 help='zero-index columns for t, w, dw, rr')
+    p.add_option('--ltrange', type='float', nargs=2, default=None,
+                 help='log theta[deg] range to fit')
+    p.add_option('--awlim', type='float', nargs=2, default=(1e-2, 1e2),
+                 help='range for A_w')
+    p.add_option('--gammalim', type='float', nargs=2, default=(1., 3.),
+                 help='range for gamma')
+    p.add_option('--iter', type='int', default=110000,
+                 help='MCMC sampling iteration')
+    p.add_option('--burn', type='int', default=10000,
+                 help='MCMC sampling burning iteration')
+    p.add_option('--thin', type='int', default=2,
+                 help='MCMC sampling thinning step')
+
+    opts, args = p.parse_args()
+
+    filename = args[0]
+
+    main(filename, ltrange=opts.ltrange, columns=opts.columns,
+         iter=opts.iter, burn=opts.burn, thin=opts.thin)
