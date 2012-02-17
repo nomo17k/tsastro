@@ -102,7 +102,7 @@ class Gaussian(Morph2D):
     Gaussian approximation to a point source.
     """
 
-    def __init__(self, ftot=1., gsig=2., hwsigma=5., **kwargs):
+    def __init__(self, ftot=1., gsig=2., hwfactor=5., **kwargs):
         """
         Input:
 
@@ -113,9 +113,9 @@ class Gaussian(Morph2D):
         super(Gaussian, self).__init__(**kwargs)
         self.ftot = ftot
         self.gsig = gsig
-        self.hwsigma = hwsigma
-        self.xhw = np.ceil(hwsigma * gsig)
-        self.yhw = np.ceil(hwsigma * gsig)
+        self.hwfactor = hwfactor
+        self.xhw = np.ceil(hwfactor * gsig)
+        self.yhw = np.ceil(hwfactor * gsig)
 
     @property
     def parameters(self):

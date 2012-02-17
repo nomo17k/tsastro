@@ -31,7 +31,7 @@ def parsemodelstr(tokens):
     """
     # model id as in input and class object and number of parameters
     # (can use a list for flexible number of params; see GIM2D)
-    modeltable = {'gauss': (Gaussian, (2,)),
+    modeltable = {'gauss': (Gaussian, (2, 10)),
                   'gim2d': (GIM2D, (9, 10, 11))}
 
     # array to store binary table info
