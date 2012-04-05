@@ -1,0 +1,149 @@
+#!/usr/bin/env python2.6
+"""
+Limber inversion for transforming an angular correlation amplitude
+into a spatial correlation length.
+
+  $ limberinv --zgauss 1.58 0.16 8.35e-3 1.8
+
+will compute correlation length from an angular correlation amplitude
+of 8.35e-3 rad^(-0.8) with power-law slope gamma = 1.8, for a Gaussian
+redshift distribution centered at z = 1.58 with standard deviation of
+0.16.
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+#from __future__ import unicode_literals
+from optparse import OptionParser
+from numpy import exp, pi, sqrt
+from scipy.integrate import quad, Inf
+from scipy.special import gamma as gammaf
+from hogg2k import Cosmos
+from hogg2k import c as C  # speed of light in km/s
+
+
+__version__ = '20120405'
+
+
+class RedshiftFunc(object):
+    """Uniform redshift distribution function"""
+
+    def __init__(self, zmin, zmax):
+        self.zmin = zmin
+        self.zmax = zmax
+
+    def f(self, z):
+        return (1. / (self.zmax - self.zmin) if (self.zmin < z < self.zmax)
+                else 0.)
+
+
+class ZGauss(RedshiftFunc):
+    """Gaussian redshift distribution function"""
+
+    def __init__(self, mean, sigma):
+        self.mean = mean
+        self.sigma = sigma
+
+    def f(self, z):
+        m, s = self.mean, self.sigma
+        return exp(-(z - m) * (z - m) / 2. / s / s) / sqrt(2. * pi) / s
+
+
+def limberinv(aw, gamma, zfunc, eps=-1.2, om=.3, ol=.7, h=.7):
+    """Transform angular correlation amplitude to spatial correlation length.
+
+    Parameters
+    ----------
+    aw : float
+        Angular correlation amplitude in units of rad^-(1 - gamma).
+    gamma : float
+        Power-law slope.
+    zfunc : RedshiftFunc
+        A RedshiftFunc object that defines redshift distribution function.
+    eps : float
+        Power-law slope for spatial correlation function evolution
+        function; see Blanc et al. (2008).  Choose either the
+        clustering is fixed in comoving coordinates (-1.2), fixed in
+        proper coordinates (0.0), or linear theory prediction (0.8).
+        Defaults to -1.2.
+    om : float
+        Omega matter, defaults to 0.3.
+    ol : float
+        Omega Lambda, defaults to 0.7.
+    h : float
+        Normalization factor for Hubble constant, h_100, defaults to
+        0.7.
+
+    Returns
+    -------
+    Spatial correlation length in Mpc.
+
+    References
+    ----------
+    Blanc et al., 2008, ApJ, 681, 1099
+    """
+    cosmos = Cosmos(omega_matter=om, omega_lambda=ol, h_100=h)
+
+    def g(z):
+        zz = (1. + z) * (1. + z)
+        return (cosmos.H0 / C) * zz * sqrt(1. + om * z + ol * (1. / zz - 1))
+
+    def fz(z):
+        return 1. / (1. + z)**(3. + eps)
+
+    def ig1(z):
+        return fz(z) * cosmos.D_A(z)**(1. - gamma) * zfunc.f(z)**2 * g(z)
+
+    int1 = quad(ig1, 0., Inf)[0]
+    int2 = quad(zfunc.f, 0., Inf)[0]
+
+    k = sqrt(pi) * gammaf(0.5 * (gamma - 1.)) / gammaf(0.5 * gamma)
+
+    # aw is in units of 1 / deg**(1-gamma); need to be in radians
+    aw *= (180. / pi)**(1. - gamma)
+
+    return (aw / (k * int1 / int2 / int2))**(1. / gamma)
+
+
+def main(aw, gamma, zgauss=None, ztophat=None, eps=None, cosmo=None):
+
+    if zgauss is not None:
+        zfunc = ZGauss(zgauss[0], zgauss[1])
+    elif ztophat is not None:
+        zfunc = RedshiftFunc(ztophat[0], ztophat[1])
+    else:
+        zfunc = RedshiftFunc(0., 1.)
+
+    om, ol, h = (0.3, 0.7, 0.7) if cosmo is None else cosmo
+
+    eps = -1.2 if eps is None else eps
+
+    r0 = limberinv(aw, gamma, zfunc, eps=eps, om=om, ol=ol, h=h)
+
+    print(r0)
+
+
+if __name__ == '__main__':
+    usage = '%prog [OPTIONS] AW GAMMA'
+    p = OptionParser(usage=usage, description=__doc__, version=__version__)
+
+    p.add_option('--cosmo', type='float', nargs=3, default=None,
+                 help='cosmological parameters: omega_matter, omega_lambda, h')
+    p.add_option('--eps', type='float', default=None,
+                 help='redshift evolution parameter')
+    p.add_option('--zgauss', type='float', nargs=2, default=None,
+                 help='use Gaussian redshift distribution: mean, sigma')
+    p.add_option('--ztophat', type='float', nargs=2, default=None,
+                 help='use tophat redshift distribution: min, max')
+
+    opts, args = p.parse_args()
+
+    try:
+        aw = float(args[0])
+        gamma = float(args[1])
+    except IndexError:
+        print('Invalid arguments')
+        exit()
+
+    main(aw, gamma, zgauss=opts.zgauss, ztophat=opts.ztophat,
+         eps=opts.eps, cosmo=opts.cosmo)
