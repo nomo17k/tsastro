@@ -97,13 +97,14 @@ class Plot(object):
     fignum = {'radprof': 101, 'contour': 102}
     
     def __init__(self, data, coords, rmax=15, recenter=False,
-                 xpaid=None, pan=False, dpi=None):
+                 xpaid=None, pan=False, dpi=None, logscale=False):
         self.data = data
         self.coords = coords
         self.rmax = rmax
         self.recenter = recenter
         self.xpaid = xpaid
         self.pan = pan
+        self.logscale = logscale
 
         if xpaid is None:
             ts = ds9_targets()
@@ -147,8 +148,12 @@ class Plot(object):
             mfwhm = 0
 
         plt.cla()
-        plt.plot(frs, fvs, '-')
-        plt.plot(rs, vs, '.')
+        if self.logscale:
+            plt.semilogy(frs, fvs, '-')
+            plt.semilogy(rs, vs, '.')
+        else:
+            plt.plot(frs, fvs, '-')
+            plt.plot(rs, vs, '.')
         plt.xlabel('radius [pixel]')
         plt.ylabel('count')
         plt.title('%.2f %.2f [%d / %d]'
@@ -199,12 +204,12 @@ class Plot(object):
 
 
 def main(filename, coords, ext=0, rmax=15, recenter=False,
-         xpaid=None, pan=False, dpi=None):
+         xpaid=None, pan=False, dpi=None, logscale=False):
     # read image file
     with pf.open(filename, memmap=True) as f:
         data = f[0].data
     p = Plot(data, coords, rmax=rmax, recenter=recenter, xpaid=xpaid, pan=pan,
-             dpi=dpi)
+             dpi=dpi, logscale=logscale)
 
 
 if __name__ == '__main__':
@@ -220,6 +225,8 @@ if __name__ == '__main__':
                  help='recenter using the image profile')
     p.add_option('--list', type='string', default=None,
                  help='file containing a coordinates list or STDIN')
+    p.add_option('--logscale', action='store_true', default=False,
+                 help='plot on log scale')
 
     # only relevant if ds9 is running
     p.add_option('--xpaid', type='string', default=None,
@@ -251,4 +258,4 @@ if __name__ == '__main__':
     filename = args[0]
 
     main(filename, coords, rmax=opts.rmax, ext=opts.ext, recenter=opts.recenter,
-         xpaid=opts.xpaid, pan=opts.pan, dpi=opts.dpi)
+         xpaid=opts.xpaid, pan=opts.pan, dpi=opts.dpi, logscale=opts.logscale)
